@@ -590,7 +590,7 @@ public sealed class TerminalBuffer
                 if (parameterText.StartsWith(">0", StringComparison.Ordinal))
                 {
                     QueueResponse(
-                        "\x1bP>|RtlTerminal(1.0.6)\x1b\\");
+                        $"\x1bP>|RtlTerminal({AppVersion.Display})\x1b\\");
                 }
                 break;
             case 'h':

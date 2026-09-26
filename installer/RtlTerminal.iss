@@ -1,6 +1,6 @@
 #define AppName "Rtl Terminal"
 #ifndef AppVersion
-  #define AppVersion "1.0.5"
+  #error AppVersion must be supplied by build-release.ps1 or the release workflow
 #endif
 #define AppPublisher "behnamapps"
 #define AppExeName "RtlTerminal.exe"

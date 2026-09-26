@@ -84,6 +84,90 @@ internal static class Program
         CheckRtlModes();
         CheckGlyphReuse();
         CheckDialogRedraw();
+        CheckCodexPersian();
+        CheckItalic();
+    }
+    private static void CheckItalic()
+    {
+        var view = new TerminalView { Width = 800, Height = 420, FontFamily = new FontFamily("Consolas"), FontSize = 18, Background = Brushes.Black };
+        var buffer = new TerminalBuffer(70, 16);
+        byte[] Pixels(RenderTargetBitmap bitmap)
+        {
+            var data = new byte[bitmap.PixelWidth * bitmap.PixelHeight * 4];
+            bitmap.CopyPixels(data, bitmap.PixelWidth * 4, 0);
+            return data;
+        }
+        const string sample = "f j Italic text / متن فارسی";
+        var normal = Pixels(Render(view, buffer.Process("\x1b[?25l" + sample), "italic-normal.png"));
+        var italic = Pixels(Render(view, buffer.Process("\r\x1b[2K\x1b[3m" + sample), "italic-sgr3.png"));
+        if (normal.SequenceEqual(italic)) throw new Exception("SGR 3 did not change rendered text");
+        var reset = Pixels(Render(view, buffer.Process("\r\x1b[2K\x1b[23m" + sample), "italic-reset.png"));
+        if (!normal.SequenceEqual(reset)) throw new Exception("SGR 23 did not restore normal text");
+        view.FontStyle = FontStyles.Italic;
+        var preference = Pixels(Render(view, buffer.CaptureSnapshot(), "italic-preference.png"));
+        if (normal.SequenceEqual(preference)) throw new Exception("Italic font preference was ignored");
+        Console.WriteLine("PASS visible ANSI italic, independent reset and italic font preference");
+    }
+    private static void CheckCodexPersian()
+    {
+        // Output collected from installed codex-cli 0.157.1, including ZWNJ.
+        const string text = "این یک متن فارسی برای آزمایش ترمینال است.\r\n" +
+            "واژه‌های نیم‌فاصله‌دار به‌درستی نمایش داده می‌شوند.\r\n" +
+            "فایل README.md را در پوشه پروژه باز کنید.\r\n" +
+            "برای دیدن تغییرها دستور git status را اجرا کنید.\r\n" +
+            "شماره آزمایش 123 است و نتیجه را بررسی می‌کنیم.\r\n" +
+            "فاصله معمولی و نیم‌فاصله را کنار هم می‌بینیم.";
+        const System.Reflection.BindingFlags flags = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+        foreach (var alternate in new[] { false, true })
+        {
+            var view = new TerminalView { Width = 800, Height = 420, FontFamily = new FontFamily("Consolas"), FontSize = 18, Background = Brushes.Black };
+            var buffer = new TerminalBuffer(70, 16);
+            var snapshot = buffer.Process((alternate ? "\x1b[?1049h" : "") + text);
+            Render(view, snapshot, alternate ? "codex-persian-alternate.png" : "codex-persian.png");
+            var layouts = (System.Collections.IDictionary)typeof(TerminalView).GetField("_layouts", flags)!.GetValue(view)!;
+            var hit = typeof(TerminalView).GetMethod("Hit", flags)!;
+            var mouseColumn = typeof(TerminalView).GetMethod("GetLogicalColumn", flags)!;
+            foreach (var row in Enumerable.Range(0, 6))
+            {
+                var layout = layouts[row]!;
+                var line = (string)layout.GetType().GetProperty("Text")!.GetValue(layout)!;
+                var cells = ((System.Collections.IEnumerable)layout.GetType().GetProperty("Cells")!.GetValue(layout)!).Cast<object>().ToArray();
+                double Number(object cell, string name) => (double)cell.GetType().GetProperty(name)!.GetValue(cell)!;
+                foreach (var cell in cells)
+                {
+                    var start = (int)cell.GetType().GetProperty("Start")!.GetValue(cell)!;
+                    if (line[start] == ' ' && Math.Abs(Number(cell, "Width") - 10.8) > .01)
+                        throw new Exception("Persian word separator lost its cell width");
+                }
+                var logicalColumn = 0;
+                foreach (var cell in cells.OrderBy(cell => (int)cell.GetType().GetProperty("Start")!.GetValue(cell)!))
+                {
+                    var gridColumns = (int)Math.Round(Number(cell, "GridWidth") / 10.8);
+                    if (Number(cell, "Width") > 0 && gridColumns == 1)
+                    {
+                        var actual = (int)mouseColumn.Invoke(view, new object[] { row, Number(cell, "X") + Number(cell, "Width") / 2 })!;
+                        if (actual != logicalColumn)
+                            throw new Exception($"TUI mouse column {actual} differs from logical column {logicalColumn}");
+                    }
+                    logicalColumn += gridColumns;
+                }
+                foreach (System.Text.RegularExpressions.Match word in System.Text.RegularExpressions.Regex.Matches(line, @"\S+"))
+                {
+                    var first = cells.First(cell => (int)cell.GetType().GetProperty("Start")!.GetValue(cell)! == word.Index);
+                    var last = cells.Where(cell => (int)cell.GetType().GetProperty("Start")!.GetValue(cell)! < word.Index + word.Length)
+                        .MaxBy(cell => (int)cell.GetType().GetProperty("Start")!.GetValue(cell)!)!;
+                    var rtl = (bool)first.GetType().GetProperty("Rtl")!.GetValue(first)!;
+                    var a = ((int Row, int Offset))hit.Invoke(view, new object[] { new Point(Number(first,"X") + (rtl ? Number(first,"Width") - .01 : .01), row * 25 + 12) })!;
+                    var b = ((int Row, int Offset))hit.Invoke(view, new object[] { new Point(Number(last,"X") + (rtl ? .01 : Number(last,"Width") - .01), row * 25 + 12) })!;
+                    view.SelectionState = (a, b);
+                    if (view.GetSelectedText() != word.Value)
+                        throw new Exception($"Mouse hit testing selected '{view.GetSelectedText()}' instead of '{word.Value}'");
+                }
+            }
+            view.SelectionState = ((0, 0), (5, text.Split("\r\n")[5].Length));
+            if (view.GetSelectedText() != text) throw new Exception("Mixed-text copying changed logical order or spaces");
+        }
+        Console.WriteLine("PASS real Codex Persian output: spaces, ZWNJ, shaped word hit testing and mixed-text selection");
     }
     private static void CheckDialogRedraw()
     {
@@ -147,7 +231,8 @@ internal static class Program
         var alternate = buffer.Process("\x1b[?1049hسلام English دنیا");
         Render(view, alternate, "rtl-alternate.png");
         var alternatePositions = Items("Cells").Select(X).ToArray();
-        if (!positions.Select(x => Math.Round(x - minimum, 3)).SequenceEqual(alternatePositions.Select(x => Math.Round(x - alternatePositions.Min(), 3))))
+        if (positions.Length != alternatePositions.Length || positions.Zip(alternatePositions).Any(pair =>
+            Math.Abs((pair.First - minimum) - (pair.Second - alternatePositions.Min())) > .01))
             throw new Exception("Alternate screen changed mixed-text ordering");
         Render(view, alternate, "rtl-row.png", smartRtl: false, rowRtl: true);
         if (Items("Cells").Select(X).Min() < 100) throw new Exception("Row RTL did not right-align alternate screen text");

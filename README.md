@@ -159,27 +159,25 @@ To publish the application and build the installer with Inno Setup:
 The installer is created in:
 
 ```text
-release\RtlTerminal-Setup-1.0.6-x64.exe
+release\RtlTerminal-Setup-<version>-x64.exe
 ```
 
 ### Automatic GitHub Releases
 
-The repository includes a GitHub Actions workflow that creates a self-contained, single-file Windows x64 build. Push a version tag to create a GitHub Release automatically:
+The only release version is `<Version>` in `RtlTerminal.csproj`. The application, local installer build and GitHub workflow read it automatically. Update that value, commit, and push to `main` to create a GitHub Release:
 
 ```powershell
-git tag v1.0.6
-git push origin v1.0.6
+# Change <Version> in RtlTerminal.csproj, then commit.
+git push origin main
 ```
 
-The workflow publishes these downloadable release assets:
+The workflow publishes one downloadable release asset:
 
 ```text
-RtlTerminal-1.0.6-win-x64.exe
-RtlTerminal-1.0.6-win-x64.zip
-RtlTerminal-Setup-1.0.6-x64.exe
+RtlTerminal-Setup-<version>-x64.exe
 ```
 
-The portable executable and installer include the self-contained .NET runtime and do not require a separate .NET installation. The Setup file provides installation shortcuts and standard Windows uninstall support. The workflow can also be started manually from the GitHub **Actions** page; manual runs create downloadable workflow artifacts without creating a GitHub Release.
+The installer includes the self-contained .NET runtime. The workflow can also be started manually from GitHub **Actions**; both triggers create or update the release for the project version. Build the installer locally with `build-release.ps1`; its version is passed to Inno Setup automatically.
 
 ### Keyboard and Mouse Shortcuts
 
@@ -366,14 +364,14 @@ dotnet publish RtlTerminal.csproj `
 
 ### ساخت خودکار Release در گیت‌هاب
 
-این مخزن دارای GitHub Actions است که نسخه مستقل و تک‌فایلی ویندوز ۶۴ بیتی را می‌سازد. برای ایجاد Release خودکار، یک تگ نسخه ایجاد و Push کنید:
+این مخزن با GitHub Actions فقط فایل نصب ویندوز ۶۴ بیتی را در Release قرار می‌دهد. برای انتشار، مقدار `<Version>` را در `RtlTerminal.csproj` تغییر دهید، کامیت کنید و به `main` پوش کنید:
 
 ```powershell
-git tag v1.0.6
-git push origin v1.0.6
+# نسخه را در RtlTerminal.csproj تغییر دهید و کامیت کنید.
+git push origin main
 ```
 
-پس از پایان Workflow، فایل‌های Portable، فایل `ZIP` و فایل Setup دارای Uninstall در بخش Releases قرار می‌گیرند و برای اجرا به نصب جداگانه .NET نیاز ندارند. اجرای دستی Workflow از بخش Actions فقط Artifact قابل دانلود می‌سازد.
+پس از پایان Workflow، فقط فایل Setup دارای Uninstall در بخش Releases قرار می‌گیرد و برای اجرا به نصب جداگانه .NET نیاز ندارد. اجرای دستی Workflow نیز ریلیز نسخهٔ پروژه را ایجاد یا به‌روزرسانی می‌کند.
 
 ### میان‌برها
 
@@ -491,14 +489,14 @@ dotnet publish RtlTerminal.csproj `
 
 ### إنشاء Release تلقائياً على GitHub
 
-يتضمن المستودع GitHub Actions لبناء إصدار Windows x64 مستقل وذي ملف واحد. أنشئ وادفع وسم إصدار لإنشاء GitHub Release تلقائياً:
+ينشر GitHub Actions ملف تثبيت Windows x64 فقط. غيّر قيمة `<Version>` في `RtlTerminal.csproj`، ثم احفظ التغيير في commit وادفعه إلى `main`:
 
 ```powershell
-git tag v1.0.6
-git push origin v1.0.6
+# غيّر النسخة في RtlTerminal.csproj ثم أنشئ commit.
+git push origin main
 ```
 
-بعد اكتمال Workflow ستظهر ملفات `EXE` و`ZIP` المحمولة وملف Setup الذي يدعم إزالة التثبيت في صفحة Releases. لا تحتاج هذه الملفات إلى تثبيت .NET بشكل منفصل. التشغيل اليدوي من صفحة Actions ينشئ Artifact قابلاً للتنزيل فقط.
+بعد اكتمال Workflow سيظهر ملف Setup فقط في صفحة Releases، وهو يدعم إزالة التثبيت ولا يحتاج إلى تثبيت .NET بشكل منفصل. التشغيل اليدوي من صفحة Actions ينشئ إصدار نسخة المشروع أو يحدّثه أيضاً.
 
 ### الاختصارات
 

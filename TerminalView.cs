@@ -25,6 +25,7 @@ public sealed class TerminalView : ContentControl
     private static readonly Regex Links = new(@"(?i)\b(?:https?://|www\.)[^\s<>{}\[\]""']+", RegexOptions.Compiled);
     public event Action<Uri>? LinkRequested;
     public bool HasSelection => _anchor is not null && _end is not null && _anchor != _end;
+    public bool IsSelecting => _dragging;
     public double VerticalOffset => _scroll.VerticalOffset;
     public double ViewportWidth => _scroll.ViewportWidth;
     public double ViewportHeight => _scroll.ViewportHeight;
@@ -138,10 +139,38 @@ public sealed class TerminalView : ContentControl
     public bool TryGetGridCell(MouseEventArgs e, out int x, out int y)
     {
         var point = e.GetPosition(_surface);
-        x = (int)Math.Floor(point.X / _cellWidth) + 1;
+        x = GetLogicalColumn((int)Math.Floor(point.Y / _lineHeight), point.X) + 1;
         y = (int)Math.Floor(point.Y / _lineHeight) - (_snapshot?.ScrollbackCount ?? 0) + 1;
         return point.X >= 0 && point.X < ViewportWidth && point.Y >= VerticalOffset &&
             point.Y < VerticalOffset + ViewportHeight && y > 0;
+    }
+
+    private int GetLogicalColumn(int row, double visualX)
+    {
+        var physicalColumn = (int)Math.Floor(visualX / _cellWidth);
+        if (_snapshot is null || row < 0 || row >= _snapshot.Lines.Count ||
+            (!_snapshot.Lines[row].ContainsRightToLeft && !_rowRtl))
+            return physicalColumn;
+
+        // TUI applications receive logical terminal columns, not the positions
+        // after bidi layout. Use the same shaped cells as local selection.
+        var layout = Layout(row);
+        var hit = layout.Cells.FirstOrDefault(cell => cell.Width > 0 &&
+            visualX >= cell.X && visualX < cell.X + cell.Width);
+        if (hit is null) return physicalColumn;
+        var column = 0;
+        foreach (var cell in layout.Cells.OrderBy(cell => cell.Start))
+        {
+            var columns = (int)Math.Round(cell.GridWidth / _cellWidth);
+            if (ReferenceEquals(cell, hit))
+            {
+                var fraction = (visualX - cell.X) / cell.Width;
+                if (cell.Rtl) fraction = 1 - fraction;
+                return column + Math.Clamp((int)(fraction * columns), 0, Math.Max(0, columns - 1));
+            }
+            column += columns;
+        }
+        return physicalColumn;
     }
     public void ClearSelection() { _anchor = _end = null; _surface.InvalidateVisual(); }
     public void SelectAll()
@@ -155,7 +184,7 @@ public sealed class TerminalView : ContentControl
     public void CopySelection()
     {
         if (!HasSelection || _snapshot is null) return;
-        Clipboard.SetText(GetSelectedText());
+        Clipboard.SetDataObject(GetSelectedText(), true);
         ClearSelection();
     }
 
@@ -296,9 +325,24 @@ public sealed class TerminalView : ContentControl
                 if (!span.IsRightToLeft && width > 0)
                     glyphs.Add(new DrawGlyph(text.Substring(member.Start, member.Length), cellX, width, false, member.Start, style));
             }
-            // Shape a complete RTL span together so Arabic joining survives ANSI style boundaries.
+            // Keep word separators at terminal-cell width. Shaping an entire padded
+            // row scales its spaces along with proportional Arabic fallback glyphs.
+            // Words still span ANSI style boundaries, preserving Arabic joining.
             if (span.IsRightToLeft && members.Length > 0)
-                glyphs.Add(new DrawGlyph(text.Substring(span.Start, span.Length), x, spanWidth, true, span.Start, StyleAt(line, span.Start)));
+            {
+                for (var i = 0; i < members.Length;)
+                {
+                    var start = i++;
+                    var whitespace = char.IsWhiteSpace(text[members[start].Start]);
+                    while (i < members.Length && char.IsWhiteSpace(text[members[i].Start]) == whitespace) i++;
+                    var firstOffset = members[start].Start;
+                    var endOffset = members[i - 1].Start + members[i - 1].Length;
+                    var segment = cells.Where(cell => cell.Start >= firstOffset && cell.Start < endOffset).ToArray();
+                    glyphs.Add(new DrawGlyph(text.Substring(firstOffset, endOffset - firstOffset),
+                        segment.Min(cell => cell.X), segment.Sum(cell => cell.Width), true,
+                        firstOffset, StyleAt(line, firstOffset)));
+                }
+            }
             x += spanWidth;
         }
         var result = new RowLayout(line, text, cells, glyphs);
@@ -365,7 +409,7 @@ public sealed class TerminalView : ContentControl
             {
                 var column = 0; DrawCell? cursor = null;
                 foreach (var cell in layout.Cells.OrderBy(cell => cell.Start))
-                { if (_snapshot.CursorColumn >= column && _snapshot.CursorColumn < column + cell.Width / _cellWidth) { cursor = cell; break; } column += (int)Math.Round(cell.Width / _cellWidth); }
+                { if (_snapshot.CursorColumn >= column && _snapshot.CursorColumn < column + cell.GridWidth / _cellWidth) { cursor = cell; break; } column += (int)Math.Round(cell.GridWidth / _cellWidth); }
                 var rect = new Rect(cursor?.X ?? _snapshot.CursorColumn * _cellWidth, y, Math.Max(_cellWidth, cursor?.Width ?? _cellWidth), _lineHeight);
                 dc.DrawRectangle(new SolidColorBrush(Color.FromArgb(90, 230, 230, 230)), new Pen(Brushes.LightGray, 1), rect);
             }
@@ -442,9 +486,26 @@ public sealed class TerminalView : ContentControl
             }
             }
             glyph.Formatted = formatted;
-            dc.PushClip(new RectangleGeometry(new Rect(glyph.X, y, glyph.Width, _lineHeight)));
+            // Italic ink can extend past its advance width (notably f and j).
+            // Preserve that overhang; the surface still clips to the viewport.
+            var overhang = glyph.Style.Italic || FontStyle != FontStyles.Normal ? FontSize / 2 : 0;
+            dc.PushClip(new RectangleGeometry(new Rect(glyph.X - overhang, y, glyph.Width + 2 * overhang, _lineHeight)));
             var scale = glyph.Rtl && formatted.WidthIncludingTrailingWhitespace > 0 ? glyph.Width / formatted.WidthIncludingTrailingWhitespace : 1;
             var origin = glyph.Rtl ? glyph.X + glyph.Width : glyph.X;
+            if (glyph.Rtl && !string.IsNullOrWhiteSpace(glyph.Text))
+            {
+                // Selection, links and caret use the same shaped glyph positions
+                // that DrawText uses, including ligatures and variable-width letters.
+                for (var i = 0; i < layout.Cells.Count; i++)
+                {
+                    var cell = layout.Cells[i];
+                    if (cell.Start < glyph.Start || cell.Start >= glyph.Start + glyph.Text.Length) continue;
+                    var geometry = formatted.BuildHighlightGeometry(new Point(origin, 0), cell.Start - glyph.Start, cell.Length);
+                    if (geometry is null || geometry.Bounds.IsEmpty) continue;
+                    var bounds = geometry.Bounds;
+                    layout.Cells[i] = cell with { X = origin + (bounds.Left - origin) * scale, Width = bounds.Width * scale };
+                }
+            }
             dc.PushTransform(new ScaleTransform(scale, 1, origin, y));
             dc.DrawText(formatted, new Point(origin, y + Math.Max(0, (_lineHeight - formatted.Height) / 2)));
             dc.Pop(); dc.Pop();
@@ -517,7 +578,10 @@ public sealed class TerminalView : ContentControl
             _rows[row] = (visual, drawing, y);
         }
     }
-    private sealed record DrawCell(int Start, int Length, double X, double Width, bool Rtl, TerminalStyle Style);
+    private sealed record DrawCell(int Start, int Length, double X, double Width, bool Rtl, TerminalStyle Style)
+    {
+        public double GridWidth { get; init; } = Width;
+    }
     private sealed record DrawGlyph(string Text, double X, double Width, bool Rtl, int Start, TerminalStyle Style)
     {
         public FormattedText? Formatted { get; set; }

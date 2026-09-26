@@ -26,14 +26,7 @@ jobs:
         id: version
         shell: pwsh
         run: |
-          [xml]$project = Get-Content RtlTerminal.csproj
-          $version = $project.Project.PropertyGroup.Version | Select-Object -First 1
-          if ([string]::IsNullOrWhiteSpace($version)) {
-            $version = $project.Project.PropertyGroup.VersionPrefix | Select-Object -First 1
-          }
-          if ([string]::IsNullOrWhiteSpace($version)) {
-            throw 'Could not read Version from RtlTerminal.csproj.'
-          }
+          $version = & ./get-version.ps1
           "version=$version" >> $env:GITHUB_OUTPUT
           "tag=v$version" >> $env:GITHUB_OUTPUT
 
@@ -57,10 +50,6 @@ jobs:
           $iscc = (Get-Command ISCC.exe -ErrorAction Stop).Source
           & $iscc "/DAppVersion=${{ steps.version.outputs.version }}" installer\RtlTerminal.iss
 
-      - name: Package application
-        shell: pwsh
-        run: Compress-Archive -Path publish/win-x64/* -DestinationPath RtlTerminal-${{ steps.version.outputs.version }}-win-x64.zip
-
       - name: Create or update GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -71,10 +60,9 @@ jobs:
           $installer = "release/RtlTerminal-Setup-$env:VERSION-x64.exe"
           $releaseExists = gh release view $env:TAG 2>$null
           if ($LASTEXITCODE -eq 0) {
-            gh release upload $env:TAG "RtlTerminal-$env:VERSION-win-x64.zip" --clobber
             gh release upload $env:TAG $installer --clobber
           } else {
-            gh release create $env:TAG "RtlTerminal-$env:VERSION-win-x64.zip" $installer `
+            gh release create $env:TAG $installer `
               --title "RtlTerminal $env:VERSION" `
               --generate-notes `
               --target $env:GITHUB_SHA

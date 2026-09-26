@@ -7,6 +7,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="..\..\AppVersion.cs" Link="AppVersion.cs" />
     <Compile Include="..\..\TerminalBuffer.cs" Link="TerminalBuffer.cs" />
     <Compile Include="..\..\SmartRtl.cs" Link="SmartRtl.cs" />
   </ItemGroup>
