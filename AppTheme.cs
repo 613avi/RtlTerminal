@@ -20,7 +20,7 @@ public static class AppTheme
         new(5, 80, 174),
         new(130, 80, 223),
         new(27, 124, 131),
-        new(87, 96, 106),
+        new(66, 74, 83),
         new(110, 119, 129),
         new(164, 14, 38),
         new(26, 127, 55),
@@ -28,7 +28,7 @@ public static class AppTheme
         new(9, 105, 218),
         new(130, 80, 223),
         new(49, 146, 170),
-        new(36, 41, 47)
+        new(13, 17, 23)
     ];
 
     // Applications pick colors assuming a dark screen, so explicit
@@ -43,7 +43,7 @@ public static class AppTheme
         new(251, 239, 255),
         new(216, 243, 246),
         new(208, 215, 222),
-        new(208, 215, 222),
+        new(225, 230, 235),
         new(255, 206, 203),
         new(172, 238, 187),
         new(255, 236, 153),
@@ -59,6 +59,15 @@ public static class AppTheme
             .GroupBy(entry => entry.color)
             .ToDictionary(group => group.Key, group => group.First().index);
 
+    // Neutral grays of the 256-color palette: the 24-step ramp (232-255)
+    // and the gray diagonal of the color cube. On a light screen their
+    // lightness is inverted so every step stays distinct and readable.
+    private static readonly HashSet<TerminalColor> PaletteGrays =
+    [
+        .. Enumerable.Range(0, 24).Select(step => Gray((byte)(8 + step * 10))),
+        .. new byte[] { 0, 95, 135, 175, 215, 255 }.Select(Gray)
+    ];
+
     public static AppThemeKind Current { get; private set; } = AppThemeKind.Dark;
 
     public static bool IsLight => Current == AppThemeKind.Light;
@@ -70,14 +79,21 @@ public static class AppTheme
         IsLight ? new(255, 255, 255) : new(12, 12, 12);
 
     public static TerminalColor MapForeground(TerminalColor color) =>
-        IsLight && PaletteIndexes.TryGetValue(color, out var index)
-            ? LightForegrounds[index]
-            : color;
+        !IsLight ? color
+        : PaletteIndexes.TryGetValue(color, out var index) ? LightForegrounds[index]
+        : PaletteGrays.Contains(color) ? InvertGray(color)
+        : color;
 
     public static TerminalColor MapBackground(TerminalColor color) =>
-        IsLight && PaletteIndexes.TryGetValue(color, out var index)
-            ? LightBackgrounds[index]
-            : color;
+        !IsLight ? color
+        : PaletteIndexes.TryGetValue(color, out var index) ? LightBackgrounds[index]
+        : PaletteGrays.Contains(color) ? InvertGray(color)
+        : color;
+
+    private static TerminalColor Gray(byte value) => new(value, value, value);
+
+    private static TerminalColor InvertGray(TerminalColor color) =>
+        Gray((byte)(255 - color.Red));
 
     public static Color TabAccent => IsLight ? Rgb(15, 118, 110) : Rgb(114, 214, 197);
     public static Color TabIcon => IsLight ? Rgb(101, 109, 118) : Rgb(139, 148, 158);

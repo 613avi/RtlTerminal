@@ -66,7 +66,7 @@ internal static class ScreenshotCapture
                 "  └──────────────────────────────────────────────┘\r\n\r\n" +
                 "  Demo output · https://github.com/mirbehnam/RtlTerminal");
 
-            const string themeDemo =
+            var themeDemo =
                 "\x1b[?25l\r\n\x1b[36m  THEMES  /  ANSI palette\x1b[0m\r\n\r\n" +
                 "به ترمینال فارسی خوش آمدید\r\n\r\n" +
                 "  \x1b[30mblack\x1b[0m \x1b[31mred\x1b[0m \x1b[32mgreen\x1b[0m \x1b[33myellow\x1b[0m " +
@@ -74,6 +74,8 @@ internal static class ScreenshotCapture
                 "  \x1b[90mblack\x1b[0m \x1b[91mred\x1b[0m \x1b[92mgreen\x1b[0m \x1b[93myellow\x1b[0m " +
                 "\x1b[94mblue\x1b[0m \x1b[95mmagenta\x1b[0m \x1b[96mcyan\x1b[0m \x1b[97mwhite\x1b[0m\r\n\r\n" +
                 "  \x1b[41m red \x1b[42m green \x1b[43m yellow \x1b[44m blue \x1b[45m magenta \x1b[46m cyan \x1b[47m white \x1b[40m black \x1b[0m\r\n" +
+                "  " + string.Concat(Enumerable.Range(232, 24).Select(index => $"\x1b[48;5;{index}m  ")) + "\x1b[0m\r\n" +
+                "  " + string.Concat(Enumerable.Range(0, 12).Select(step => $"\x1b[38;5;{234 + step * 2}mgray ")) + "\x1b[0m\r\n" +
                 "  \x1b[97;44m status bar \x1b[0m \x1b[7m inverse \x1b[0m \x1b[2mdim text\x1b[0m \x1b[1mbold\x1b[0m\r\n\r\n" +
                 "  \x1b[32m✓\x1b[0m  Light window chrome, menus and tabs\r\n" +
                 "  \x1b[32m✓\x1b[0m  Readable ANSI colors on a light background\r\n\r\n" +
