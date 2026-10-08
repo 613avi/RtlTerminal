@@ -34,6 +34,8 @@ public partial class App : Application
             return;
         }
 
+        foreach (var theme in Enum.GetValues<AppThemeKind>())
+            AppTheme.SetOverrides(theme, AppSettings.LoadCustomColors(theme));
         AppTheme.Apply(AppSettings.LoadTheme());
         MainWindow = new MainWindow();
         MainWindow.Show();

@@ -173,4 +173,99 @@ public static class AppSettings
             RegistryValueKind.DWord);
     }
 
+    public static Dictionary<string, System.Windows.Media.Color> LoadCustomColors(AppThemeKind theme)
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(SettingsKey);
+        var colors = new Dictionary<string, System.Windows.Media.Color>();
+
+        if (key?.GetValue($"CustomColors{theme}") is not string[] entries)
+            return colors;
+
+        foreach (var entry in entries)
+        {
+            var separator = entry.IndexOf('=');
+
+            if (separator > 0 && TryParseColor(entry[(separator + 1)..], out var color))
+                colors[entry[..separator]] = color;
+        }
+
+        return colors;
+    }
+
+    public static void SaveCustomColors(AppThemeKind theme, IReadOnlyDictionary<string, System.Windows.Media.Color> colors)
+    {
+        using var key = Registry.CurrentUser.CreateSubKey(SettingsKey);
+
+        if (colors.Count == 0)
+        {
+            key.DeleteValue($"CustomColors{theme}", throwOnMissingValue: false);
+            return;
+        }
+
+        key.SetValue(
+            $"CustomColors{theme}",
+            colors.Select(entry => $"{entry.Key}={FormatColor(entry.Value)}").ToArray(),
+            RegistryValueKind.MultiString);
+    }
+
+    public static string FormatColor(System.Windows.Media.Color color) =>
+        $"#{color.R:X2}{color.G:X2}{color.B:X2}";
+
+    public static bool TryParseColor(string? text, out System.Windows.Media.Color color)
+    {
+        color = default;
+        text = text?.Trim().TrimStart('#');
+
+        if (text is not { Length: 6 } ||
+            !int.TryParse(text, System.Globalization.NumberStyles.HexNumber, null, out var value))
+        {
+            return false;
+        }
+
+        color = System.Windows.Media.Color.FromRgb(
+            (byte)(value >> 16),
+            (byte)(value >> 8),
+            (byte)value);
+        return true;
+    }
+
+    // Folder for new tabs when none is requested; null keeps the folder
+    // RtlTerminal was started in.
+    public static string? LoadStartupDirectory()
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(SettingsKey);
+        return key?.GetValue("StartupDirectory") as string is { Length: > 0 } directory
+            ? directory
+            : null;
+    }
+
+    public static void SaveStartupDirectory(string? directory)
+    {
+        using var key = Registry.CurrentUser.CreateSubKey(SettingsKey);
+
+        if (string.IsNullOrWhiteSpace(directory))
+            key.DeleteValue("StartupDirectory", throwOnMissingValue: false);
+        else
+            key.SetValue("StartupDirectory", directory.Trim(), RegistryValueKind.String);
+    }
+
+    public static bool LoadShowStartupBanner() => LoadFlag("ShowStartupBanner", true);
+
+    public static void SaveShowStartupBanner(bool show) => SaveFlag("ShowStartupBanner", show);
+
+    public static bool LoadCheckUpdatesOnStartup() => LoadFlag("CheckUpdatesOnStartup", true);
+
+    public static void SaveCheckUpdatesOnStartup(bool check) => SaveFlag("CheckUpdatesOnStartup", check);
+
+    private static bool LoadFlag(string name, bool defaultValue)
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(SettingsKey);
+        return key?.GetValue(name) is int value ? value != 0 : defaultValue;
+    }
+
+    private static void SaveFlag(string name, bool value)
+    {
+        using var key = Registry.CurrentUser.CreateSubKey(SettingsKey);
+        key.SetValue(name, value ? 1 : 0, RegistryValueKind.DWord);
+    }
 }

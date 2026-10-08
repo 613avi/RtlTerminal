@@ -639,11 +639,23 @@ ApplySavedFontSettings();
         var theme = ReferenceEquals(sender, LightThemeMenuItem)
             ? AppThemeKind.Light
             : AppThemeKind.Dark;
-        AppTheme.Apply(theme);
         AppSettings.SaveTheme(theme);
+        ApplyTheme(theme);
+        TerminalTextBox.Focus();
+    }
+
+    internal void ApplyTheme(AppThemeKind theme)
+    {
+        AppTheme.Apply(theme);
         UpdateThemeMenu();
         RebuildTabStrip();
         TerminalTextBox.RefreshTheme();
+    }
+
+    private void SettingsMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        var settingsWindow = new SettingsWindow(this) { Owner = this };
+        settingsWindow.ShowDialog();
         TerminalTextBox.Focus();
     }
 
@@ -665,7 +677,7 @@ ApplySavedFontSettings();
         // Let terminal startup finish before performing optional network I/O.
         await Task.Delay(TimeSpan.FromSeconds(1.5));
 
-        if (!IsLoaded)
+        if (!IsLoaded || !AppSettings.LoadCheckUpdatesOnStartup())
             return;
 
         await CheckForUpdatesAsync(manual: false);
@@ -962,6 +974,12 @@ ApplySavedFontSettings();
             return directory;
         }
 
+        if (AppSettings.LoadStartupDirectory() is { } savedDirectory &&
+            TryResolveDirectory(Environment.ExpandEnvironmentVariables(savedDirectory), out directory))
+        {
+            return directory;
+        }
+
         return TryResolveDirectory(Environment.CurrentDirectory, out directory)
             ? directory
             : null;
@@ -1002,6 +1020,18 @@ ApplySavedFontSettings();
         };
 
     private static string GetProfileCommand(TerminalProfile profile) =>
+        AppSettings.LoadShowStartupBanner()
+            ? GetBannerProfileCommand(profile)
+            : profile switch
+            {
+                TerminalProfile.PowerShell =>
+                    @"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoLogo",
+                TerminalProfile.Wsl =>
+                    @"C:\Windows\System32\wsl.exe --exec sh -lc ""exec \""${SHELL:-/bin/bash}\"" -l""",
+                _ => @"C:\Windows\System32\cmd.exe /D /Q /K ""chcp 65001>nul"""
+            };
+
+    private static string GetBannerProfileCommand(TerminalProfile profile) =>
         (profile switch
         {
             TerminalProfile.PowerShell =>

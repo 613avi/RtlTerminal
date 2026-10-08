@@ -527,6 +527,9 @@
                 </MenuItem>
             </MenuItem>
             <MenuItem Header="_Tools">
+                <MenuItem Header="_Settings..."
+                          Click="SettingsMenuItem_Click" />
+                <Separator />
                 <MenuItem x:Name="ContextMenuIntegrationMenuItem"
                           Header="Add _Open in RtlTerminal"
                           IsCheckable="True"

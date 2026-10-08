@@ -421,7 +421,7 @@ public sealed class TerminalView : ContentControl
                 var (start, end) = SelectionRange();
                 if (row >= start.Row && row <= end.Row)
                     foreach (var cell in layout.Cells.Where(cell => (row != start.Row || cell.Start + cell.Length > start.Offset) && (row != end.Row || cell.Start < end.Offset)))
-                        dc.DrawRectangle(new SolidColorBrush(Color.FromArgb(100, 70, 125, 200)), null, new Rect(cell.X, y, cell.Width, _lineHeight));
+                        dc.DrawRectangle(new SolidColorBrush(AppTheme.SelectionFill), null, new Rect(cell.X, y, cell.Width, _lineHeight));
             }
             if (_snapshot.CursorVisible && row == _snapshot.CursorRow)
             {
