@@ -78,7 +78,7 @@ public static class Ui
         ["Colors"] = "צבעים",
         ["Startup folder for new tabs"] = "תיקיית ההתחלה של כרטיסיות חדשות",
         ["Browse..."] = "עיון...",
-        ["Leave empty to start in the folder RtlTerminal was opened in. Environment variables such as %USERPROFILE% are supported."] = "אם משאירים ריק, כרטיסייה חדשה תיפתח בתיקייה שממנה הופעל RtlTerminal. אפשר להשתמש במשתני סביבה כמו %USERPROFILE%.",
+        ["Leave empty to start in the folder RtlTerminal was opened in. Environment variables such as %USERPROFILE% are supported."] = "אם משאירים ריק, כרטיסייה חדשה תיפתח בתיקייה שממנה הופעל RtlTerminal. אפשר להשתמש במשתני סביבה כמו \u200E%\u2060USERPROFILE\u2060%\u200E.",
         ["Show the developer's welcome banner when a tab opens"] = "הצגת באנר הפתיחה של המפתח בכל כרטיסייה חדשה",
         ["Check for updates on startup"] = "בדיקת עדכונים בהפעלה",
         ["Changes to the banner and the folder apply to new tabs."] = "השינויים בבאנר ובתיקייה יחולו על כרטיסיות חדשות.",
