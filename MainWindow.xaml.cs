@@ -398,7 +398,7 @@ ApplySavedFontSettings();
         object sender,
         MouseButtonEventArgs e)
     {
-        if (IsSgrMouseTrackingEnabled() && !TerminalTextBox.HasSelection)
+        if (IsMouseTrackingEnabled() && !TerminalTextBox.HasSelection)
             return;
 
         e.Handled = true;
@@ -463,7 +463,7 @@ ApplySavedFontSettings();
     {
         var mode = _lastRenderedSnapshot?.Modes.MouseTrackingMode ?? 0;
 
-        if (!IsSgrMouseTrackingEnabled() ||
+        if (!IsMouseTrackingEnabled() ||
             mode == 1000 ||
             mode == 1002 && e.LeftButton != MouseButtonState.Pressed &&
                 e.MiddleButton != MouseButtonState.Pressed &&
@@ -487,7 +487,7 @@ ApplySavedFontSettings();
         }
 
         _lastReportedMouseCell = (x, y, button);
-        SendSgrMouse(button + 32, x, y, released: false);
+        SendMouseReport(button + 32, x, y, released: false);
         e.Handled = true;
     }
 
@@ -495,13 +495,26 @@ ApplySavedFontSettings();
         object sender,
         MouseWheelEventArgs e)
     {
-        if (!IsSgrMouseTrackingEnabled() ||
+        if (_session is not null && !IsMouseTrackingEnabled() &&
+            _lastRenderedSnapshot?.Modes is { AlternateScreen: true } modes &&
+            (Keyboard.Modifiers & ModifierKeys.Shift) == 0)
+        {
+            // The alternate screen has no scrollback; like other terminals,
+            // turn the wheel into cursor keys so full-screen apps still scroll.
+            var key = (e.Delta > 0 ? "A" : "B");
+            var sequence = modes.ApplicationCursorKeys ? $"\x1bO{key}" : $"\x1b[{key}";
+            _session.Write(string.Concat(Enumerable.Repeat(sequence, 3)));
+            e.Handled = true;
+            return;
+        }
+
+        if (!IsMouseTrackingEnabled() ||
             !TryGetMouseCell(e, out var x, out var y))
         {
             return;
         }
 
-        SendSgrMouse(e.Delta > 0 ? 64 : 65, x, y, released: false);
+        SendMouseReport(e.Delta > 0 ? 64 : 65, x, y, released: false);
         e.Handled = true;
     }
 
@@ -529,17 +542,17 @@ ApplySavedFontSettings();
     {
         if (button == 0 && (Keyboard.Modifiers & ModifierKeys.Control) != 0 && TerminalTextBox.IsLinkAt(e))
             return false;
-        if (!IsSgrMouseTrackingEnabled() ||
+        if (!IsMouseTrackingEnabled() ||
             !TryGetMouseCell(e, out var x, out var y))
         {
             return false;
         }
 
-        SendSgrMouse(button, x, y, released);
+        SendMouseReport(button, x, y, released);
         return true;
     }
 
-    private void SendSgrMouse(int button, int x, int y, bool released)
+    private void SendMouseReport(int button, int x, int y, bool released)
     {
         if (_session is null)
             return;
@@ -553,18 +566,29 @@ ApplySavedFontSettings();
         if ((Keyboard.Modifiers & ModifierKeys.Control) != 0)
             button += 16;
 
-        _session.Write($"\x1b[<{button};{x};{y}{(released ? 'm' : 'M')}");
+        if (_lastRenderedSnapshot?.Modes.SgrMouse == true)
+        {
+            _session.Write($"\x1b[<{button};{x};{y}{(released ? 'm' : 'M')}");
+            return;
+        }
+
+        // Legacy X10 encoding: releases carry button 3 and values are offset
+        // by 32. Output is UTF-8, so only values that stay single-byte are sent.
+        if (x > 95 || y > 95)
+            return;
+
+        var code = released && button < 64 ? (button & ~3) | 3 : button;
+        _session.Write($"\x1b[M{(char)(32 + code)}{(char)(32 + x)}{(char)(32 + y)}");
     }
 
     private bool TryGetMouseCell(MouseEventArgs e, out int x, out int y) =>
         TerminalTextBox.TryGetGridCell(e, out x, out y);
 
-    private bool IsSgrMouseTrackingEnabled() =>
+    private bool IsMouseTrackingEnabled() =>
         !TerminalTextBox.IsSelecting &&
         (Keyboard.Modifiers & ModifierKeys.Shift) == 0 && _lastRenderedSnapshot?.Modes is
         {
-            MouseTrackingMode: > 0,
-            SgrMouse: true
+            MouseTrackingMode: > 0
         };
 
     private static int GetMouseButtonCode(MouseButton button) =>

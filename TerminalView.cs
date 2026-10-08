@@ -289,15 +289,6 @@ public sealed class TerminalView : ContentControl
              cached.Source.CellLength == line.CellLength && cached.Source.Runs.SequenceEqual(line.Runs)))
             return cached;
         var text = Text(line);
-        var rightAlign = _rowRtl || SmartRtl.ShouldRightAlign(line, _smartRtl, _snapshot.Modes.AlternateScreen);
-        // Paragraph direction is independent of screen-grid alignment. Shaping
-        // Arabic/Persian spans remains active even when Smart RTL is disabled.
-        var baseRtl = _rowRtl || (_smartRtl && line.ContainsRightToLeft);
-        var spans = line.ContainsRightToLeft
-            ? SmartRtl.GetDirectionalSpans(text, baseRtl)
-            : text.Length == 0 ? [] : new[] { new DirectionalSpan(0, text.Length, false) };
-        var cells = new List<DrawCell>();
-        var glyphs = new List<DrawGlyph>();
         var widths = new List<(int Start, int Length, int Width)>();
         var enumerator = StringInfo.GetTextElementEnumerator(text);
         while (enumerator.MoveNext())
@@ -306,8 +297,50 @@ public sealed class TerminalView : ContentControl
             widths.Add((enumerator.ElementIndex, element.Length,
                 element.EnumerateRunes().Max(TerminalBuffer.GetCellWidth)));
         }
-        var totalWidth = widths.Sum(item => item.Width) * _cellWidth;
-        var x = rightAlign ? Math.Max(0, _scroll.ViewportWidth - totalWidth) : 0;
+        var cells = new List<DrawCell>();
+        var glyphs = new List<DrawGlyph>();
+        if (_snapshot.Modes.AlternateScreen && !_rowRtl && line.ContainsRightToLeft)
+        {
+            // Full-screen applications place side-by-side panels by column.
+            // Reordering the whole row would swap those panels, so bidi runs
+            // inside each panel segment and every segment keeps its columns.
+            var column = 0;
+            foreach (var segment in GridSegments(line, text, widths))
+            {
+                var segmentText = text.Substring(segment[0].Start,
+                    segment[^1].Start + segment[^1].Length - segment[0].Start);
+                var segmentRtl = SmartRtl.ContainsRightToLeft(segmentText);
+                LayoutSegment(line, text, segment, column * _cellWidth,
+                    _smartRtl && segmentRtl, segmentRtl, cells, glyphs);
+                column += segment.Sum(item => item.Width);
+            }
+        }
+        else
+        {
+            var rightAlign = _rowRtl || SmartRtl.ShouldRightAlign(line, _smartRtl, _snapshot.Modes.AlternateScreen);
+            // Paragraph direction is independent of screen-grid alignment. Shaping
+            // Arabic/Persian spans remains active even when Smart RTL is disabled.
+            var baseRtl = _rowRtl || (_smartRtl && line.ContainsRightToLeft);
+            var totalWidth = widths.Sum(item => item.Width) * _cellWidth;
+            var x = rightAlign ? Math.Max(0, _scroll.ViewportWidth - totalWidth) : 0;
+            LayoutSegment(line, text, widths, x, baseRtl, line.ContainsRightToLeft, cells, glyphs);
+        }
+        var result = new RowLayout(line, text, cells, glyphs);
+        _layouts[row] = result;
+        return result;
+    }
+
+    private void LayoutSegment(TerminalLine line, string text,
+        IReadOnlyList<(int Start, int Length, int Width)> widths, double x,
+        bool baseRtl, bool containsRtl, List<DrawCell> cells, List<DrawGlyph> glyphs)
+    {
+        if (widths.Count == 0) return;
+        var segmentStart = widths[0].Start;
+        var segmentLength = widths[^1].Start + widths[^1].Length - segmentStart;
+        var spans = containsRtl
+            ? SmartRtl.GetDirectionalSpans(text.Substring(segmentStart, segmentLength), baseRtl)
+                .Select(span => span with { Start = span.Start + segmentStart }).ToArray()
+            : new[] { new DirectionalSpan(segmentStart, segmentLength, false) };
         var orderedSpans = baseRtl ? spans.Reverse() : spans;
         foreach (var span in orderedSpans)
         {
@@ -345,9 +378,39 @@ public sealed class TerminalView : ContentControl
             }
             x += spanWidth;
         }
-        var result = new RowLayout(line, text, cells, glyphs);
-        _layouts[row] = result;
-        return result;
+    }
+
+    // Splits a full-screen row into the pieces a TUI lays out independently:
+    // runs of text, gaps of two or more spaces, single box-drawing characters,
+    // and changes of background color (panel fills).
+    private static List<List<(int Start, int Length, int Width)>> GridSegments(TerminalLine line, string text,
+        List<(int Start, int Length, int Width)> widths)
+    {
+        var segments = new List<List<(int Start, int Length, int Width)>>();
+        List<(int Start, int Length, int Width)>? current = null;
+        var currentKind = -1;
+        (TerminalColor? Background, bool Inverse) currentFill = default;
+        for (var index = 0; index < widths.Count; index++)
+        {
+            var item = widths[index];
+            var character = text[item.Start];
+            var space = char.IsWhiteSpace(character);
+            var kind = character is >= '\u2500' and <= '\u259f' ? 2
+                : space && (index > 0 && char.IsWhiteSpace(text[widths[index - 1].Start]) ||
+                    index + 1 < widths.Count && char.IsWhiteSpace(text[widths[index + 1].Start])) ? 1
+                : 0;
+            var style = StyleAt(line, item.Start);
+            var fill = (style.Background, style.Inverse);
+            if (current is null || kind != currentKind || kind == 2 || fill != currentFill)
+            {
+                current = [];
+                segments.Add(current);
+                currentKind = kind;
+                currentFill = fill;
+            }
+            current.Add(item);
+        }
+        return segments;
     }
 
     private static TerminalStyle StyleAt(TerminalLine line, int offset)

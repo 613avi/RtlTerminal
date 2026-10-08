@@ -234,6 +234,16 @@ internal static class Program
         if (positions.Length != alternatePositions.Length || positions.Zip(alternatePositions).Any(pair =>
             Math.Abs((pair.First - minimum) - (pair.Second - alternatePositions.Min())) > .01))
             throw new Exception("Alternate screen changed mixed-text ordering");
+        var panels = new TerminalBuffer(70, 16).Process("\x1b[?1049hسلام English" + new string(' ', 20) + "│ Context دنیا");
+        Render(view, panels, "rtl-alternate-panels.png");
+        var cellWidth = (double)typeof(TerminalView).GetField("_cellWidth", flags)!.GetValue(view)!;
+        var panelText = (string)Layout().GetType().GetProperty("Text")!.GetValue(Layout())!;
+        var border = Items("Cells").Single(cell => (int)cell.GetType().GetProperty("Start")!.GetValue(cell)! == panelText.IndexOf('│'));
+        if (Math.Abs(X(border) - panelText.IndexOf('│') * cellWidth) > .01)
+            throw new Exception("Smart RTL moved a full-screen panel border out of its column");
+        var panelCells = Items("Cells").Where(cell => (int)cell.GetType().GetProperty("Start")!.GetValue(cell)! > panelText.IndexOf('│')).ToArray();
+        if (panelCells.Any(cell => X(cell) < X(border)))
+            throw new Exception("Side panel text crossed into the main panel");
         Render(view, alternate, "rtl-row.png", smartRtl: false, rowRtl: true);
         if (Items("Cells").Select(X).Min() < 100) throw new Exception("Row RTL did not right-align alternate screen text");
         var surface = typeof(TerminalView).GetField("_surface", flags)!.GetValue(view)!;
@@ -245,7 +255,7 @@ internal static class Program
         var menu = (System.Windows.Controls.MenuItem)window.FindName("RowRtlMenuItem");
         if (menu.IsChecked || (string)menu.Header != "Row RTL") throw new Exception("Row RTL menu name/default incorrect");
         window.Close();
-        Console.WriteLine("PASS Persian shaping with Smart RTL off, mixed alternate-screen ordering, opt-in Row RTL and retained visuals");
+        Console.WriteLine("PASS Persian shaping with Smart RTL off, mixed alternate-screen ordering, fixed panel columns, opt-in Row RTL and retained visuals");
     }
     private static object RowDrawing(TerminalView view, int row)
     {

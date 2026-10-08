@@ -40,6 +40,17 @@ internal static class SmartRtl
         return false;
     }
 
+    internal static bool ContainsRightToLeft(string text)
+    {
+        foreach (var rune in text.EnumerateRunes())
+        {
+            if (IsStrongRtlLetter(rune))
+                return true;
+        }
+
+        return false;
+    }
+
     public static IReadOnlyList<DirectionalSpan> GetDirectionalSpans(
         string text,
         bool baseRightToLeft)
