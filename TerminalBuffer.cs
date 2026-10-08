@@ -982,7 +982,7 @@ public sealed class TerminalBuffer
         return false;
     }
 
-    private static TerminalColor Get256Color(int index)
+    internal static TerminalColor Get256Color(int index)
     {
         index = Math.Clamp(index, 0, 255);
 
@@ -992,6 +992,12 @@ public sealed class TerminalBuffer
         if (index >= 232)
         {
             var gray = (byte)(8 + ((index - 232) * 10));
+
+            // Step 243 equals bright black; keep it distinct so themes
+            // can remap the ramp separately from the 16-color palette.
+            if (gray == AnsiColors[8].Red)
+                gray++;
+
             return new(gray, gray, gray);
         }
 

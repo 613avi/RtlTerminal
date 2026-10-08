@@ -64,8 +64,8 @@ public static class AppTheme
     // lightness is inverted so every step stays distinct and readable.
     private static readonly HashSet<TerminalColor> PaletteGrays =
     [
-        .. Enumerable.Range(0, 24).Select(step => Gray((byte)(8 + step * 10))),
-        .. new byte[] { 0, 95, 135, 175, 215, 255 }.Select(Gray)
+        .. Enumerable.Range(232, 24).Select(TerminalBuffer.Get256Color),
+        .. new[] { 16, 59, 102, 145, 188, 231 }.Select(TerminalBuffer.Get256Color)
     ];
 
     public static AppThemeKind Current { get; private set; } = AppThemeKind.Dark;
