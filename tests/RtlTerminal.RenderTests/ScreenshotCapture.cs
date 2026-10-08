@@ -2,6 +2,7 @@ using System.Collections;
 using System.IO;
 using System.Reflection;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -101,6 +102,34 @@ internal static class ScreenshotCapture
             typeof(MainWindow).GetMethod("RebuildTabStrip", flags)!.Invoke(window, null);
             view.RefreshTheme();
             Capture("rtl-terminal-light.png", themeDemo);
+
+            foreach (var language in new[] { UiLanguage.English, UiLanguage.Hebrew })
+            {
+                Ui.Language = language;
+                for (var page = 0; page < 2; page++)
+                {
+                    var settings = new SettingsWindow(window) { Owner = window, Width = 720, Height = 660 };
+                    settings.Show();
+                    ((DockPanel)settings.Content).Children.OfType<TabControl>().Single().SelectedIndex = page;
+                    settings.UpdateLayout();
+                    settings.Dispatcher.Invoke(() => { }, DispatcherPriority.ContextIdle);
+                    var root = (FrameworkElement)settings.Content;
+                    var image = new RenderTargetBitmap((int)root.ActualWidth + 32, (int)root.ActualHeight + 32, 96, 96, PixelFormats.Pbgra32);
+                    var frame = new DrawingVisual();
+                    using (var context = frame.RenderOpen())
+                    {
+                        context.DrawRectangle(settings.Background, null, new Rect(0, 0, image.Width, image.Height));
+                        context.DrawRectangle(new VisualBrush(root), null, new Rect(16, 16, root.ActualWidth, root.ActualHeight));
+                    }
+                    image.Render(frame);
+                    var name = $"settings-{(page == 0 ? "general" : "colors")}-{language.ToString().ToLowerInvariant()}.png";
+                    var pngEncoder = new PngBitmapEncoder(); pngEncoder.Frames.Add(BitmapFrame.Create(image));
+                    using (var file = File.Create(Path.Combine("screenshots", name))) pngEncoder.Save(file);
+                    Console.WriteLine($"Captured screenshots/{name}");
+                    settings.Close();
+                }
+            }
+            Ui.Language = UiLanguage.English;
 
             void Capture(string name, string output)
             {
