@@ -47,6 +47,7 @@ Rtl Terminal uses the Windows ConPTY API and works with command-line environment
 ### Features
 
 - Choose a saved dark or light theme from `View` → `Theme`. Light mode adapts the 16 ANSI colors while preserving explicit RGB and extended palette colors.
+- Pick a ready-made color scheme from `View` → `Dark color schemes` or `Light color schemes`: Campbell, One Half, Solarized, Tango, Dracula, GitHub Dark, Nord, Gruvbox, Tokyo Night and Catppuccin. A scheme sets the default and 16 ANSI colors and switches to its matching theme.
 - Custom WPF cell renderer with cached visible rows and seamless block/box graphics.
 - Chrome-style tabs, adjacent new-tab button, dark menus and vector window controls.
 - Default terminal font size of 14; existing saved font preferences are retained.
@@ -295,6 +296,7 @@ No license file is currently included. Add a `LICENSE` file before accepting ext
 ### امکانات
 
 - انتخاب تم روشن یا تیره از `View` → `Theme` با ذخیرهٔ انتخاب؛ حفظ رنگ‌های RGB صریح برنامه‌ها
+- انتخاب طرح‌های رنگی آماده (Campbell، One Half، Solarized، Tango، Dracula، Nord، Gruvbox و دیگران) از `View` → `Dark color schemes` یا `Light color schemes`
 - اعمال Smart RTL برای هر خط با حفظ جهت درست بخش‌های انگلیسی، اعداد و علائم
 - نمایش متن فارسی، عربی، انگلیسی و متن‌های ترکیبی
 - پشتیبانی از رنگ‌های ANSI، رنگ‌های روشن، متن کم‌رنگ، ۲۵۶ رنگ و RGB
@@ -421,6 +423,7 @@ git push origin main
 ### المميزات
 
 - اختيار مظهر فاتح أو داكن من `View` → `Theme` مع حفظ الاختيار والحفاظ على ألوان RGB الصريحة
+- اختيار مخططات ألوان جاهزة (Campbell وOne Half وSolarized وTango وDracula وNord وGruvbox وغيرها) من `View` → `Dark color schemes` أو `Light color schemes`
 - تطبيق Smart RTL لكل سطر مع الحفاظ على اتجاه المقاطع الإنجليزية والأرقام وعلامات الترقيم
 - عرض النصوص العربية والفارسية والإنجليزية والنصوص المختلطة
 - دعم ألوان ANSI والألوان الساطعة والنص الخافت و256 لوناً وألوان RGB

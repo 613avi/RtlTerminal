@@ -117,6 +117,18 @@ public static class AppSettings
         key.SetValue("Theme", theme.ToString(), RegistryValueKind.String);
     }
 
+    public static string? LoadColorScheme()
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(SettingsKey);
+        return key?.GetValue("ColorScheme") as string;
+    }
+
+    public static void SaveColorScheme(string? name)
+    {
+        using var key = Registry.CurrentUser.CreateSubKey(SettingsKey);
+        key.SetValue("ColorScheme", name ?? "", RegistryValueKind.String);
+    }
+
     public static TerminalFontSettings? LoadFont()
     {
         using var key = Registry.CurrentUser.OpenSubKey(SettingsKey);

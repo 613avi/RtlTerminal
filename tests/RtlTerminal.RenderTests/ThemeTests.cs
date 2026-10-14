@@ -51,13 +51,29 @@ internal static partial class Program
                 !replies.Contains("\x1b]11;rgb:ffff/ffff/ffff\x1b\\") ||
                 !replies.Contains("\x1b]12;rgb:2424/2929/2f2f\x1b\\"))
                 throw new Exception("OSC queries did not report the active light default colors");
+            AppTheme.Apply(AppThemeKind.Dark, ColorScheme.Find("Dracula"));
+            view.RefreshTheme();
+            var dracula = Pixels(Render(view, snapshot, "theme-dracula.png"));
+            AssertPixel(dracula, 5, 12, new(255, 85, 85));
+            AssertPixel(dracula, 16, 12, new(197, 15, 31));
+            AssertPixel(dracula, 27, 12, new(255, 85, 85));
+            AssertPixel(dracula, 5, 37, new(255, 85, 85));
+            if (AppTheme.DefaultBackground != new TerminalColor(40, 42, 54))
+                throw new Exception("The scheme did not set the default background");
+            AppTheme.Apply(AppThemeKind.Dark, ColorScheme.Find("One Half Light"));
+            if (!AppTheme.IsLight)
+                throw new Exception("A light scheme did not switch to the light theme");
+            view.RefreshTheme();
+            var halfLight = Pixels(Render(view, snapshot, "theme-one-half-light.png"));
+            AssertPixel(halfLight, 5, 12, new(228, 86, 73));
+            AssertPixel(halfLight, 5, 37, new(245, 217, 214));
             AppTheme.Apply(AppThemeKind.Dark);
             view.Background = new SolidColorBrush(Color.FromRgb(12, 12, 12));
             view.RefreshTheme();
             var restored = Pixels(Render(view, snapshot, "theme-dark-restored.png"));
             if (!dark.SequenceEqual(restored))
                 throw new Exception("Switching back to dark retained light colors or stale glyphs");
-            Console.WriteLine("PASS live theme switching, ANSI/indexed remapping, exact RGB preservation and OSC defaults");
+            Console.WriteLine("PASS live theme switching, ANSI/indexed remapping, color schemes, exact RGB preservation and OSC defaults");
         }
         finally { AppTheme.Apply(AppThemeKind.Dark); }
     }

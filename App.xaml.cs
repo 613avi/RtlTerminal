@@ -33,7 +33,7 @@ public partial class App : Application
             return;
         }
 
-        AppTheme.Apply(AppSettings.LoadTheme());
+        AppTheme.Apply(AppSettings.LoadTheme(), ColorScheme.Find(AppSettings.LoadColorScheme()));
         MainWindow = new MainWindow();
         MainWindow.Show();
     }

@@ -515,6 +515,8 @@
                     <MenuItem x:Name="LightThemeMenuItem" Header="_Light" IsCheckable="True"
                               Click="ThemeMenuItem_Click" />
                 </MenuItem>
+                <MenuItem x:Name="DarkSchemesMenuItem" Header="Dark color _schemes" />
+                <MenuItem x:Name="LightSchemesMenuItem" Header="Light color s_chemes" />
             </MenuItem>
             <MenuItem Header="_Tools">
                 <MenuItem x:Name="ContextMenuIntegrationMenuItem"

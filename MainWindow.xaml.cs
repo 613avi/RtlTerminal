@@ -67,6 +67,7 @@ public partial class MainWindow : Window
         _defaultProfile = LoadDefaultProfile();
         _historySize = AppSettings.LoadHistorySize();
 ApplySavedFontSettings();
+        BuildSchemeMenus();
         UpdateThemeMenu();
         UpdateFontMetrics();
     }
@@ -637,18 +638,52 @@ ApplySavedFontSettings();
         var theme = ReferenceEquals(sender, LightThemeMenuItem)
             ? AppThemeKind.Light
             : AppThemeKind.Dark;
-        AppTheme.Apply(theme);
-        AppSettings.SaveTheme(theme);
+        ApplyColors(theme, null);
+    }
+
+    private void ApplyColors(AppThemeKind theme, ColorScheme? scheme)
+    {
+        AppTheme.Apply(theme, scheme);
+        AppSettings.SaveTheme(AppTheme.Current);
+        AppSettings.SaveColorScheme(scheme?.Name);
         UpdateThemeMenu();
         RebuildTabStrip();
         TerminalTextBox.RefreshTheme();
         TerminalTextBox.Focus();
     }
 
+    private void BuildSchemeMenus()
+    {
+        foreach (var (menu, theme) in new[] { (DarkSchemesMenuItem, AppThemeKind.Dark), (LightSchemesMenuItem, AppThemeKind.Light) })
+        {
+            var defaults = new MenuItem { Header = "Default colors", IsCheckable = true, DataContext = theme };
+            defaults.Click += (_, _) => ApplyColors(theme, null);
+            menu.Items.Add(defaults);
+            menu.Items.Add(new Separator());
+
+            foreach (var scheme in ColorScheme.All.Where(scheme => scheme.Theme == theme))
+            {
+                var item = new MenuItem { Header = scheme.Name, IsCheckable = true, DataContext = scheme };
+                item.Click += (_, _) => ApplyColors(theme, scheme);
+                menu.Items.Add(item);
+            }
+        }
+    }
+
     private void UpdateThemeMenu()
     {
         DarkThemeMenuItem.IsChecked = !AppTheme.IsLight;
         LightThemeMenuItem.IsChecked = AppTheme.IsLight;
+
+        foreach (var item in DarkSchemesMenuItem.Items.OfType<MenuItem>().Concat(LightSchemesMenuItem.Items.OfType<MenuItem>()))
+        {
+            item.IsChecked = item.DataContext switch
+            {
+                ColorScheme scheme => AppTheme.Scheme == scheme,
+                AppThemeKind theme => AppTheme.Scheme is null && AppTheme.Current == theme,
+                _ => false
+            };
+        }
     }
 
     private async void CheckForUpdatesMenuItem_Click(

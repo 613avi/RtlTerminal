@@ -55,23 +55,28 @@ public static class AppTheme
 
     public static AppThemeKind Current { get; private set; } = AppThemeKind.Dark;
 
+    // The selected color scheme, or null for the built-in colors of the theme.
+    public static ColorScheme? Scheme { get; private set; }
+
     public static bool IsLight => Current == AppThemeKind.Light;
 
     public static TerminalColor DefaultForeground =>
-        IsLight ? new(36, 41, 47) : new(230, 230, 230);
+        Scheme?.DefaultForeground ?? (IsLight ? new(36, 41, 47) : new(230, 230, 230));
 
     public static TerminalColor DefaultBackground =>
-        IsLight ? new(255, 255, 255) : new(12, 12, 12);
+        Scheme?.DefaultBackground ?? (IsLight ? new(255, 255, 255) : new(12, 12, 12));
 
     public static TerminalColor MapForeground(TerminalColor color, int? paletteIndex = null) =>
-        IsLight && paletteIndex is >= 0 and < 16
-            ? LightForegrounds[paletteIndex.Value]
-            : color;
+        paletteIndex is not (>= 0 and < 16) ? color
+        : Scheme is not null ? Scheme.Text(paletteIndex.Value)
+        : IsLight ? LightForegrounds[paletteIndex.Value]
+        : color;
 
     public static TerminalColor MapBackground(TerminalColor color, int? paletteIndex = null) =>
-        IsLight && paletteIndex is >= 0 and < 16
-            ? LightBackgrounds[paletteIndex.Value]
-            : color;
+        paletteIndex is not (>= 0 and < 16) ? color
+        : Scheme is not null ? Scheme.Fill(paletteIndex.Value)
+        : IsLight ? LightBackgrounds[paletteIndex.Value]
+        : color;
 
     public static Color TabAccent => IsLight ? Rgb(15, 118, 110) : Rgb(114, 214, 197);
     public static Color TabIcon => IsLight ? Rgb(101, 109, 118) : Rgb(139, 148, 158);
@@ -87,9 +92,12 @@ public static class AppTheme
     public static Color ScrollThumbPressed => IsLight ? Rgb(110, 119, 129) : Rgb(170, 170, 170);
     public static Color CursorBorder => IsLight ? Rgb(110, 119, 129) : Colors.LightGray;
 
-    public static void Apply(AppThemeKind theme)
+    // A scheme switches to its own dark or light theme.
+    public static void Apply(AppThemeKind theme, ColorScheme? scheme = null)
     {
-        Current = theme;
+        Current = scheme?.Theme ?? theme;
+        Scheme = scheme;
+        theme = Current;
         TerminalBuffer.DefaultForeground = DefaultForeground;
         TerminalBuffer.DefaultBackground = DefaultBackground;
         var light = theme == AppThemeKind.Light;
@@ -122,6 +130,12 @@ public static class AppTheme
         Set("RoundButtonPressedBrush", 81, 82, 86, 190, 196, 203);
         Set("RoundButtonFocusBrush", 69, 79, 96, 196, 214, 240);
 
+        if (scheme is not null)
+        {
+            resources["TerminalBackgroundBrush"] = Frozen(ToColor(scheme.DefaultBackground));
+            resources["TerminalForegroundBrush"] = Frozen(ToColor(scheme.DefaultForeground));
+        }
+
         // Menus in the window share the terminal scrollbar style.
         resources["ScrollTrackBrush"] = Frozen(ScrollTrack);
         resources["ScrollThumbBrush"] = Frozen(ScrollThumb);
@@ -135,6 +149,9 @@ public static class AppTheme
         brush.Freeze();
         return brush;
     }
+
+    private static Color ToColor(TerminalColor color) =>
+        Color.FromRgb(color.Red, color.Green, color.Blue);
 
     private static Color Rgb(byte red, byte green, byte blue) =>
         Color.FromRgb(red, green, blue);
