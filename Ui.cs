@@ -26,9 +26,9 @@ public static class Ui
         ["Row RTL"] = "RTL בכל השורות",
         ["Force right-to-left direction and right alignment for every row, including full-screen applications. This may move application borders."] =
             "כיוון מימין לשמאל ויישור לימין בכל שורה, גם ביישומים במסך מלא. עלול להזיז את המסגרות של היישום.",
-        ["_Theme"] = "_ערכת צבעים",
+        ["_Theme"] = "_מצב תצוגה",
         ["_Dark"] = "_כהה",
-        ["_Light"] = "_בהירה",
+        ["_Light"] = "_בהיר",
         ["_Language"] = "_שפה",
         ["_Tools"] = "_כלים",
         ["Add _Open in RtlTerminal"] = "הוספת „Open in RtlTerminal” לקליק הימני",
@@ -87,6 +87,9 @@ public static class Ui
         ["Light"] = "בהירה",
         ["Reset all colors"] = "איפוס כל הצבעים",
         ["Color scheme"] = "סכמת צבעים",
+        ["Dark color _schemes"] = "_סכמות צבעים כהות",
+        ["Light color s_chemes"] = "סכמות צבעים _בהירות",
+        ["Customize _colors..."] = "_התאמה אישית של צבעים...",
         ["Choose a scheme..."] = "בחירת סכמה...",
         ["Default colors"] = "צבעי ברירת המחדל",
         ["Programs that pick exact RGB colors are not affected by the scheme. In Claude Code, choose a theme ending in \"(ANSI colors only)\" with /theme so it follows these colors."] =

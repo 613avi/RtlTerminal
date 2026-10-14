@@ -57,6 +57,7 @@ public partial class MainWindow : Window
             { MessageBox.Show(this, exception.Message, Ui.T("Open link"), MessageBoxButton.OK, MessageBoxImage.Error); }
         };
         SmartRtlMenuItem.IsChecked = true;
+        BuildSchemeMenus();
         ApplyLanguage();
         _renderTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
@@ -731,10 +732,61 @@ ApplySavedFontSettings();
         TerminalTextBox.Focus();
     }
 
+    private void CustomizeColorsMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        var colorsWindow = new SettingsWindow(this, SettingsPage.Colors) { Owner = this };
+        colorsWindow.ShowDialog();
+        TerminalTextBox.Focus();
+    }
+
+    private void BuildSchemeMenus()
+    {
+        foreach (var (menu, theme) in new[] { (DarkSchemesMenuItem, AppThemeKind.Dark), (LightSchemesMenuItem, AppThemeKind.Light) })
+        {
+            var defaults = new MenuItem { Header = "Default colors", IsCheckable = true, Tag = "Default colors", DataContext = theme };
+            defaults.Click += (_, _) => ApplySchemeFromMenu(theme, null);
+            menu.Items.Add(defaults);
+            menu.Items.Add(new Separator());
+
+            foreach (var scheme in ColorScheme.All.Where(scheme => scheme.Theme == theme))
+            {
+                var item = new MenuItem { Header = scheme.Name, IsCheckable = true, Tag = scheme.Name, DataContext = scheme };
+                item.Click += (_, _) => ApplySchemeFromMenu(theme, scheme);
+                menu.Items.Add(item);
+            }
+        }
+    }
+
+    private void ApplySchemeFromMenu(AppThemeKind theme, ColorScheme? scheme)
+    {
+        var overrides = new Dictionary<string, System.Windows.Media.Color>(AppTheme.GetOverrides(theme));
+
+        if (scheme is null)
+            ColorScheme.ResetTerminalColors(overrides);
+        else
+            scheme.ApplyTo(overrides);
+
+        AppTheme.SetOverrides(theme, overrides);
+        AppSettings.SaveCustomColors(theme, overrides);
+        AppSettings.SaveTheme(theme);
+        ApplyTheme(theme);
+        TerminalTextBox.Focus();
+    }
+
     private void UpdateThemeMenu()
     {
         DarkThemeMenuItem.IsChecked = !AppTheme.IsLight;
         LightThemeMenuItem.IsChecked = AppTheme.IsLight;
+
+        foreach (var item in DarkSchemesMenuItem.Items.OfType<MenuItem>().Concat(LightSchemesMenuItem.Items.OfType<MenuItem>()))
+        {
+            item.IsChecked = item.DataContext switch
+            {
+                ColorScheme scheme => scheme.IsActive,
+                AppThemeKind theme => ColorScheme.UsesDefaultTerminalColors(theme),
+                _ => false
+            };
+        }
     }
 
     private async void CheckForUpdatesMenuItem_Click(

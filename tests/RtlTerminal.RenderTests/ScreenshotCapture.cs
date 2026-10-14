@@ -108,9 +108,8 @@ internal static class ScreenshotCapture
                 Ui.Language = language;
                 for (var page = 0; page < 2; page++)
                 {
-                    var settings = new SettingsWindow(window) { Owner = window, Width = 720, Height = 660 };
+                    var settings = new SettingsWindow(window, (SettingsPage)page) { Owner = window, Width = 720, Height = page == 0 ? 340 : 660 };
                     settings.Show();
-                    ((DockPanel)settings.Content).Children.OfType<TabControl>().Single().SelectedIndex = page;
                     settings.UpdateLayout();
                     settings.Dispatcher.Invoke(() => { }, DispatcherPriority.ContextIdle);
                     var root = (FrameworkElement)settings.Content;

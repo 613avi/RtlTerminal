@@ -8,7 +8,13 @@ using System.Windows.Media;
 
 namespace RtlTerminal;
 
-// General options and the color editor. Color edits are previewed live and
+public enum SettingsPage
+{
+    General,
+    Colors
+}
+
+// General options or the color editor. Color edits are previewed live and
 // rolled back when the window is cancelled.
 public sealed class SettingsWindow : Window
 {
@@ -24,15 +30,16 @@ public sealed class SettingsWindow : Window
     private readonly CheckBox _checkUpdates = new() { Content = Ui.T("Check for updates on startup"), Margin = new Thickness(0, 10, 0, 0) };
     private readonly ComboBox _theme = new() { Width = 140 };
     private readonly ComboBox _scheme = new() { Width = 170 };
+    private readonly SettingsPage _page;
     private bool _loading;
     private bool _saved;
 
-    public SettingsWindow(MainWindow owner)
+    public SettingsWindow(MainWindow owner, SettingsPage page = SettingsPage.General)
     {
         _owner = owner;
         _originalColors = Enum.GetValues<AppThemeKind>().ToDictionary(theme => theme, AppTheme.GetOverrides);
         _colors = _originalColors.ToDictionary(entry => entry.Key, entry => new Dictionary<string, Color>(entry.Value));
-        Title = Ui.T("Settings");
+        Title = Ui.T(page == SettingsPage.Colors ? "Colors" : "Settings");
         Icon = owner.Icon;
         Width = 720;
         Height = 660;
@@ -42,9 +49,10 @@ public sealed class SettingsWindow : Window
         Background = new SolidColorBrush(Color.FromRgb(244, 245, 247));
         FlowDirection = Ui.IsRightToLeft ? FlowDirection.RightToLeft : FlowDirection.LeftToRight;
 
-        var tabs = new TabControl();
-        tabs.Items.Add(new TabItem { Header = Ui.T("General"), Content = CreateGeneralPage() });
-        tabs.Items.Add(new TabItem { Header = Ui.T("Colors"), Content = CreateColorsPage() });
+        _page = page;
+        var content = page == SettingsPage.Colors ? CreateColorsPage() : CreateGeneralPage();
+        if (page == SettingsPage.General)
+            Height = 340;
 
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 14, 0, 0) };
         buttons.Children.Add(CreateButton("Cancel", (_, _) => Close(), isCancel: true));
@@ -54,7 +62,7 @@ public sealed class SettingsWindow : Window
         var root = new DockPanel { Margin = new Thickness(16) };
         DockPanel.SetDock(buttons, Dock.Bottom);
         root.Children.Add(buttons);
-        root.Children.Add(tabs);
+        root.Children.Add(content);
         Content = root;
         Closed += (_, _) => RestoreIfCancelled();
     }
@@ -177,19 +185,11 @@ public sealed class SettingsWindow : Window
         if (tag is ColorScheme scheme)
         {
             _theme.SelectedIndex = scheme.Theme == AppThemeKind.Light ? 1 : 0;
-            var colors = _colors[SelectedTheme];
-            foreach (var (key, value) in scheme.Colors())
-            {
-                if (value == AppTheme.Catalog.First(color => color.Key == key).Default(SelectedTheme))
-                    colors.Remove(key);
-                else
-                    colors[key] = value;
-            }
+            scheme.ApplyTo(_colors[SelectedTheme]);
         }
         else
         {
-            foreach (var key in ColorScheme.Keys)
-                _colors[SelectedTheme].Remove(key);
+            ColorScheme.ResetTerminalColors(_colors[SelectedTheme]);
         }
 
         Preview();
@@ -245,6 +245,17 @@ public sealed class SettingsWindow : Window
     private void Save()
     {
         CommitFocusedHex();
+
+        if (_page == SettingsPage.Colors)
+        {
+            foreach (var (theme, colors) in _colors)
+                AppSettings.SaveCustomColors(theme, colors);
+            AppSettings.SaveTheme(SelectedTheme);
+            Preview();
+            _saved = true;
+            return;
+        }
+
         var directory = Environment.ExpandEnvironmentVariables(_startupDirectory.Text.Trim());
 
         if (directory.Length > 0 && !Directory.Exists(directory))
@@ -256,10 +267,6 @@ public sealed class SettingsWindow : Window
         AppSettings.SaveStartupDirectory(_startupDirectory.Text);
         AppSettings.SaveShowStartupBanner(_showBanner.IsChecked == true);
         AppSettings.SaveCheckUpdatesOnStartup(_checkUpdates.IsChecked == true);
-        foreach (var (theme, colors) in _colors)
-            AppSettings.SaveCustomColors(theme, colors);
-        AppSettings.SaveTheme(SelectedTheme);
-        Preview();
         _saved = true;
     }
 
@@ -271,7 +278,7 @@ public sealed class SettingsWindow : Window
 
     private void RestoreIfCancelled()
     {
-        if (_saved)
+        if (_saved || _page != SettingsPage.Colors)
             return;
 
         foreach (var (theme, colors) in _originalColors)
