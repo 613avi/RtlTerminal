@@ -23,6 +23,7 @@ public sealed class SettingsWindow : Window
     private readonly CheckBox _showBanner = new() { Content = Ui.T("Show the developer's welcome banner when a tab opens"), Margin = new Thickness(0, 18, 0, 0) };
     private readonly CheckBox _checkUpdates = new() { Content = Ui.T("Check for updates on startup"), Margin = new Thickness(0, 10, 0, 0) };
     private readonly ComboBox _theme = new() { Width = 140 };
+    private readonly ComboBox _scheme = new() { Width = 170 };
     private bool _loading;
     private bool _saved;
 
@@ -95,7 +96,16 @@ public sealed class SettingsWindow : Window
         var themePicker = new StackPanel { Orientation = Orientation.Horizontal };
         themePicker.Children.Add(new TextBlock { Text = Ui.T("Theme"), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) });
         themePicker.Children.Add(_theme);
+        themePicker.Children.Add(new TextBlock { Text = Ui.T("Color scheme"), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(16, 0, 8, 0) });
+        themePicker.Children.Add(_scheme);
         header.Children.Add(themePicker);
+
+        _scheme.Items.Add(new ComboBoxItem { Content = Ui.T("Choose a scheme..."), IsEnabled = false });
+        _scheme.Items.Add(new ComboBoxItem { Content = Ui.T("Default colors"), Tag = "default" });
+        foreach (var scheme in ColorScheme.All)
+            _scheme.Items.Add(new ComboBoxItem { Content = scheme.Name, Tag = scheme });
+        _scheme.SelectedIndex = 0;
+        _scheme.SelectionChanged += (_, _) => ApplyScheme();
 
         var list = new StackPanel();
         foreach (var group in AppTheme.Catalog.GroupBy(color => color.Group))
@@ -114,6 +124,10 @@ public sealed class SettingsWindow : Window
         var page = new DockPanel { Margin = new Thickness(14) };
         DockPanel.SetDock(header, Dock.Top);
         page.Children.Add(header);
+        var hint = Hint("Programs that pick exact RGB colors are not affected by the scheme. In Claude Code, choose a theme ending in \"(ANSI colors only)\" with /theme so it follows these colors.");
+        hint.Margin = new Thickness(0, 0, 0, 10);
+        DockPanel.SetDock(hint, Dock.Top);
+        page.Children.Add(hint);
         page.Children.Add(new ScrollViewer { Content = list, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Padding = new Thickness(0, 0, 8, 0) });
         RefreshRows();
         return page;
@@ -153,6 +167,34 @@ public sealed class SettingsWindow : Window
         row.Children.Add(new TextBlock { Text = Ui.T(color.Label), VerticalAlignment = VerticalAlignment.Center });
         _rows.Add((color, swatch, hex, reset));
         return row;
+    }
+
+    private void ApplyScheme()
+    {
+        if ((_scheme.SelectedItem as ComboBoxItem)?.Tag is not { } tag)
+            return;
+
+        if (tag is ColorScheme scheme)
+        {
+            _theme.SelectedIndex = scheme.Theme == AppThemeKind.Light ? 1 : 0;
+            var colors = _colors[SelectedTheme];
+            foreach (var (key, value) in scheme.Colors())
+            {
+                if (value == AppTheme.Catalog.First(color => color.Key == key).Default(SelectedTheme))
+                    colors.Remove(key);
+                else
+                    colors[key] = value;
+            }
+        }
+        else
+        {
+            foreach (var key in ColorScheme.Keys)
+                _colors[SelectedTheme].Remove(key);
+        }
+
+        Preview();
+        RefreshRows();
+        Dispatcher.BeginInvoke(() => _scheme.SelectedIndex = 0);
     }
 
     private AppThemeKind SelectedTheme =>

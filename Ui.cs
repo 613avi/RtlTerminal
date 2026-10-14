@@ -86,6 +86,11 @@ public static class Ui
         ["Dark"] = "כהה",
         ["Light"] = "בהירה",
         ["Reset all colors"] = "איפוס כל הצבעים",
+        ["Color scheme"] = "סכמת צבעים",
+        ["Choose a scheme..."] = "בחירת סכמה...",
+        ["Default colors"] = "צבעי ברירת המחדל",
+        ["Programs that pick exact RGB colors are not affected by the scheme. In Claude Code, choose a theme ending in \"(ANSI colors only)\" with /theme so it follows these colors."] =
+            "הסכמה לא משנה תוכנות שבוחרות צבעי RGB מדויקים. כדי ש-Claude Code ישתמש בצבעים האלה, בחרו בו ב-/theme ערכה שמסתיימת ב-\"(ANSI colors only)\".",
         ["Reset"] = "איפוס",
         ["Pick a color"] = "בחירת צבע",
         ["OK"] = "אישור",
