@@ -16,7 +16,8 @@ var tests = new (string Name, Action Run)[]
     ("style changes preserve pending autowrap", StylePreservesWrap),
     ("status redraw clears old characters across reads", StatusRedraw),
     ("wide characters can be erased and overwritten", WideErase),
-    ("snapshot rows are reused without hiding edits", SnapshotReuse)
+    ("snapshot rows are reused without hiding edits", SnapshotReuse),
+    ("dropped Windows paths become WSL paths", DroppedPathsBecomeWslPaths)
 };
 
 var failures = new List<string>();
@@ -293,4 +294,12 @@ static void Assert(bool condition, string message)
 {
     if (!condition)
         throw new InvalidOperationException(message);
+}
+
+static void DroppedPathsBecomeWslPaths()
+{
+    Assert(WslPath.FromWindows(@"C:\Users\me\a.png") == "/mnt/c/Users/me/a.png", "drive path was not converted");
+    Assert(WslPath.FromWindows(@"\\wsl.localhost\Ubuntu\home\me\x") == "/home/me/x", "WSL share path was not converted");
+    Assert(WslPath.FromWindows(@"\\wsl$\Ubuntu") == "/", "WSL share root was not converted");
+    Assert(WslPath.Quote("/mnt/c/My Files/a (1).png") == @"/mnt/c/My\ Files/a\ \(1\).png", "shell characters were not escaped");
 }

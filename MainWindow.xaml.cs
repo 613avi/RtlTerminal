@@ -69,7 +69,55 @@ public partial class MainWindow : Window
 ApplySavedFontSettings();
         UpdateThemeMenu();
         UpdateFontMetrics();
+        AllowDrop = true;
+        PreviewDragOver += Window_PreviewDragOver;
+        PreviewDrop += Window_PreviewDrop;
     }
+
+    private void Window_PreviewDragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = _session is not null && IsSupportedDrop(e.Data)
+            ? DragDropEffects.Copy
+            : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void Window_PreviewDrop(object sender, DragEventArgs e)
+    {
+        e.Handled = true;
+
+        if (_session is null)
+            return;
+
+        try
+        {
+            if (e.Data.GetData(DataFormats.FileDrop) is string[] files && files.Length > 0)
+            {
+                WriteClipboardPaths(files.Where(f => !string.IsNullOrWhiteSpace(f)).ToList());
+            }
+            else if (e.Data.GetDataPresent(DataFormats.Bitmap) &&
+                e.Data.GetData(DataFormats.Bitmap) is BitmapSource bitmap)
+            {
+                WriteClipboardPaths([SaveTemporaryImage(bitmap)]);
+            }
+            else if (e.Data.GetData(DataFormats.UnicodeText) is string text && text.Length > 0)
+            {
+                WritePastedText(text.Replace("\r\n", "\r").Replace("\n", "\r"));
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Runtime.InteropServices.COMException)
+        {
+            MessageBox.Show(this, exception.Message, "Drop", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+
+        Activate();
+        TerminalTextBox.Focus();
+    }
+
+    private static bool IsSupportedDrop(IDataObject data) =>
+        data.GetDataPresent(DataFormats.FileDrop) ||
+        data.GetDataPresent(DataFormats.Bitmap) ||
+        data.GetDataPresent(DataFormats.UnicodeText);
 
     private void Window_Loaded(object sender, RoutedEventArgs e)
     {
@@ -1487,16 +1535,23 @@ _activeTab.RenderedSmartRtlEnabled = _renderedSmartRtlEnabled;
 
     private string FormatClipboardPath(string path)
     {
-        return Path.GetFullPath(path);
+        var fullPath = Path.GetFullPath(path);
+
+        if (_activeTab?.Profile == TerminalProfile.Wsl)
+            return WslPath.Quote(WslPath.FromWindows(fullPath));
+
+        return fullPath.Contains(' ') ? $"\"{fullPath}\"" : fullPath;
     }
 
     private string? SaveClipboardImage()
     {
         var image = Clipboard.GetImage();
 
-        if (image is null)
-            return null;
+        return image is null ? null : SaveTemporaryImage(image);
+    }
 
+    private string SaveTemporaryImage(BitmapSource image)
+    {
         var directory = Path.Combine(
             Path.GetTempPath(),
             "RtlTerminal",

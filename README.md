@@ -62,7 +62,8 @@ Rtl Terminal uses the Windows ConPTY API and works with command-line environment
 - Detect `http://`, `https://` and `www.` links and open them with `Ctrl + Click`.
 - Copy selected text with `Ctrl+C` or `Ctrl+Shift+C`.
 - Paste text, copied file paths and clipboard images with `Ctrl+V`, `Ctrl+Shift+V` or right-click.
-- Clipboard paths retain their Windows form; convert paths manually when needed in WSL.
+- Drag files, folders or images onto the window to paste their paths. In WSL tabs, pasted and dropped paths become `/mnt/c/...` paths with shell characters escaped, so tools such as Claude Code can attach dropped images.
+- Advertise 24-bit color with `COLORTERM=truecolor` (also forwarded into WSL), so applications do not fall back to 256 colors.
 - Send `Ctrl+C` as an interrupt when no text is selected.
 - Select any installed Windows font, font size, weight and italic style.
 - Render ANSI bold and italic styles produced by terminal applications.
@@ -188,6 +189,7 @@ The installer includes the self-contained .NET runtime. The workflow can also be
 | Paste clipboard text | `Ctrl+V` or `Ctrl+Shift+V` |
 | Paste copied files or images as paths | `Ctrl+V` or `Ctrl+Shift+V` |
 | Paste with mouse | Right-click when no text is selected |
+| Paste file or image paths by dragging | Drop files or images onto the window |
 | Copy with mouse | Right-click selected text; the selection clears after copying |
 | Open Copy/Paste menu | Context Menu (Apps) key or `Shift+F10`; opens after key release |
 | Select all retained text | `Ctrl+Shift+A` |
@@ -307,7 +309,8 @@ No license file is currently included. Add a `LICENSE` file before accepting ext
 - تشخیص لینک و بازکردن آن با `Ctrl + Click`
 - کپی متن با `Ctrl+C` یا `Ctrl+Shift+C`
 - Paste متن، مسیر فایل‌های کپی‌شده و تصویر Clipboard با `Ctrl+V`، `Ctrl+Shift+V` یا راست‌کلیک
-- حفظ مسیرهای ویندوز هنگام Paste؛ در WSL تبدیل مسیر در صورت نیاز دستی است
+- کشیدن و رهاکردن فایل، پوشه یا تصویر روی پنجره برای Paste مسیر آن؛ در تب‌های WSL مسیرها به شکل `/mnt/c/...` تبدیل می‌شوند
+- اعلام پشتیبانی از رنگ ۲۴ بیتی با `COLORTERM=truecolor` (در WSL هم)
 - ارسال Interrupt با `Ctrl+C` در صورتی که متنی انتخاب نشده باشد
 - انتخاب همه فونت‌های نصب‌شده ویندوز
 - تنظیم اندازه، ضخامت و حالت ایتالیک فونت
@@ -433,7 +436,8 @@ git push origin main
 - اكتشاف الروابط وفتحها باستخدام `Ctrl + Click`
 - نسخ النص باستخدام `Ctrl+C` أو `Ctrl+Shift+C`
 - لصق النص ومسارات الملفات المنسوخة وصور Clipboard باستخدام `Ctrl+V` أو `Ctrl+Shift+V` أو زر الفأرة الأيمن
-- تبقى المسارات الملصقة بصيغة Windows؛ حوّلها يدوياً عند الحاجة في WSL
+- سحب الملفات أو المجلدات أو الصور وإفلاتها على النافذة للصق مساراتها؛ في علامات تبويب WSL تتحول المسارات إلى صيغة `/mnt/c/...`
+- الإعلان عن دعم الألوان بعمق 24 بت عبر `COLORTERM=truecolor` (وفي WSL أيضاً)
 - إرسال أمر المقاطعة عند الضغط على `Ctrl+C` دون تحديد نص
 - اختيار جميع الخطوط المثبتة في Windows
 - تخصيص حجم الخط ووزنه ونمطه المائل
