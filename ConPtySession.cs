@@ -136,6 +136,8 @@ private const int PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE = 0x00020016;
 
 
 
+        AdvertiseTerminalCapabilities();
+
         var command = new StringBuilder(commandLine);
 
 
@@ -148,6 +150,25 @@ private const int PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE = 0x00020016;
 
             throw new Win32Exception(Marshal.GetLastWin32Error());
 
+    }
+
+    // The child inherits this environment. Without COLORTERM, apps such as
+    // Claude Code fall back to 256 colors; WSLENV forwards it into WSL.
+    private static void AdvertiseTerminalCapabilities()
+    {
+        Environment.SetEnvironmentVariable("COLORTERM", "truecolor");
+        Environment.SetEnvironmentVariable("TERM_PROGRAM", "RtlTerminal");
+
+        var wslEnv = Environment.GetEnvironmentVariable("WSLENV") ?? "";
+        var entries = wslEnv.Split(':', StringSplitOptions.RemoveEmptyEntries).ToList();
+
+        foreach (var name in new[] { "COLORTERM", "TERM_PROGRAM" })
+        {
+            if (!entries.Any(e => e.Split('/')[0].Equals(name, StringComparison.OrdinalIgnoreCase)))
+                entries.Add(name);
+        }
+
+        Environment.SetEnvironmentVariable("WSLENV", string.Join(':', entries));
     }
 
     public int Read(byte[] buffer)
