@@ -21,9 +21,10 @@ internal static class ScreenshotCapture
         window.Loaded -= (RoutedEventHandler)loaded.CreateDelegate(typeof(RoutedEventHandler), window);
         var tabs = (IList)typeof(MainWindow).GetField("_tabs", flags)!.GetValue(window)!;
         var tabType = typeof(MainWindow).GetNestedType("TerminalTab", BindingFlags.NonPublic)!;
+        var paneType = typeof(MainWindow).GetNestedType("TerminalPane", BindingFlags.NonPublic)!;
         var profileType = typeof(MainWindow).GetNestedType("TerminalProfile", BindingFlags.NonPublic)!;
-        tabs.Add(Activator.CreateInstance(tabType, 1, Enum.ToObject(profileType, 1), "PowerShell"));
-        tabs.Add(Activator.CreateInstance(tabType, 2, Enum.ToObject(profileType, 0), "Command Prompt"));
+        tabs.Add(Activator.CreateInstance(tabType, Activator.CreateInstance(paneType, 1, Enum.ToObject(profileType, 1), "PowerShell")));
+        tabs.Add(Activator.CreateInstance(tabType, Activator.CreateInstance(paneType, 2, Enum.ToObject(profileType, 0), "Command Prompt")));
         typeof(MainWindow).GetField("_activeTab", flags)!.SetValue(window, tabs[0]);
         typeof(MainWindow).GetMethod("RebuildTabStrip", flags)!.Invoke(window, null);
         try

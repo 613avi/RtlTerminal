@@ -26,20 +26,12 @@ public partial class MainWindow : Window
     private readonly List<TerminalTab> _tabs = [];
     private readonly List<string> _temporaryClipboardFiles = [];
     private TerminalTab? _activeTab;
-    private ConPtySession? _session;
-    private TerminalBuffer? _terminalBuffer;
-    private CancellationTokenSource? _cancellationTokenSource;
-    private TerminalSnapshot? _pendingSnapshot;
     private bool _renderStartQueued;
     private bool _updatingContextMenuItem;
-    private long _latestQueuedRevision;
-    private TerminalSnapshot? _lastRenderedSnapshot;
     private double _cellWidth = 8.5;
     private double _lineHeight = 18;
-    private bool _followOutput = true;
     private bool _restoringScrollPosition;
     private int _nextTabNumber = 1;
-    private bool _renderedSmartRtlEnabled = true;
     private TerminalProfile _defaultProfile = TerminalProfile.CommandPrompt;
     private int _historySize = 2000;
     private bool _updateCheckInProgress;
@@ -50,12 +42,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        TerminalTextBox.LinkRequested += uri =>
-        {
-            try { Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true }); }
-            catch (Exception exception)
-            { MessageBox.Show(this, exception.Message, "Open link", MessageBoxButton.OK, MessageBoxImage.Error); }
-        };
+        WireTerminalView(TerminalTextBox);
         SmartRtlMenuItem.IsChecked = true;
         _renderTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
@@ -75,8 +62,8 @@ ApplySavedFontSettings();
     {
         RefreshContextMenuIntegrationState();
         PromptForContextMenuIntegration();
-        TerminalTextBox.Focus();
-        TerminalTextBox.UpdateLayout();
+        ActiveView.Focus();
+        ActiveView.UpdateLayout();
         Dispatcher.BeginInvoke(
             DispatcherPriority.Loaded,
             () => CreateTerminalTab(_defaultProfile));
@@ -87,57 +74,133 @@ ApplySavedFontSettings();
         TerminalProfile profile,
         string? requestedStartupDirectory = null)
     {
-        SaveActiveTabState();
+        var pane = CreatePane(profile);
+        var tab = new TerminalTab(pane);
+        _tabs.Add(tab);
+        ShowTab(tab);
+        StartPane(pane, requestedStartupDirectory);
+        ActiveView.Focus();
+    }
+
+    // Opens a new terminal to the right of the active pane, in the same tab.
+    private void SplitActivePane()
+    {
+        if (_activeTab is null || ActivePane is not { } current)
+        {
+            CreateTerminalTab(_defaultProfile);
+            return;
+        }
+
+        StorePaneWidths();
+        var pane = CreatePane(current.Profile);
+        pane.Width = current.Width /= 2;
+        _activeTab.Panes.Insert(_activeTab.Panes.IndexOf(current) + 1, pane);
+        _activeTab.ActivePane = pane;
+        LayoutPanes();
+        RebuildTabStrip();
+        StartPane(pane, null);
+        QueueViewportResize();
+        ActiveView.Focus();
+    }
+
+    private TerminalPane CreatePane(TerminalProfile profile)
+    {
+        var pane = new TerminalPane(_nextTabNumber++, profile, GetProfileTitle(profile));
+        var inUse = _tabs.SelectMany(tab => tab.Panes).Any(other => ReferenceEquals(other.View, TerminalTextBox));
+        pane.View = inUse ? CreateTerminalView() : TerminalTextBox;
+        pane.View.Clear();
+        pane.View.Tag = pane;
+        return pane;
+    }
+
+    private void StartPane(TerminalPane pane, string? requestedStartupDirectory)
+    {
         var startupDirectory = ResolveStartupDirectory(
             requestedStartupDirectory);
-
-        var tab = new TerminalTab(
-            _nextTabNumber++,
-            profile,
-            GetProfileTitle(profile));
-        _tabs.Add(tab);
-        _activeTab = tab;
-        LoadTabState(tab);
-        RebuildTabStrip();
+        PaneHost.UpdateLayout();
 
         try
         {
-            var columns = GetColumns();
-            var rows = GetRows();
-            _terminalBuffer = new TerminalBuffer(
+            var columns = GetColumns(pane.View);
+            var rows = GetRows(pane.View);
+            pane.Buffer = new TerminalBuffer(
                 columns,
                 rows,
                 _historySize);
-            _cancellationTokenSource = new CancellationTokenSource();
-            _session = new ConPtySession(columns, rows);
-            _session.Start(
-                GetProfileCommand(profile),
+            pane.GridSize = (columns, rows);
+            pane.CancellationTokenSource = new CancellationTokenSource();
+            pane.Session = new ConPtySession(columns, rows);
+            pane.Session.Start(
+                GetProfileCommand(pane.Profile),
                 startupDirectory);
 
-            if (profile == TerminalProfile.CommandPrompt &&
+            if (pane.Profile == TerminalProfile.CommandPrompt &&
                 startupDirectory is not null)
             {
                 AppSettings.RememberCmdDirectory(startupDirectory);
             }
 
-            SaveActiveTabState();
-            _ = Task.Run(() => ReadOutputLoop(tab));
+            _ = Task.Run(() => ReadOutputLoop(pane));
         }
         catch (Exception exception)
         {
-            var errorBuffer = new TerminalBuffer(GetColumns(), GetRows());
-            Render(errorBuffer.Process("خطا در اجرای ConPTY:\r\n" + exception.Message));
+            var errorBuffer = new TerminalBuffer(GetColumns(pane.View), GetRows(pane.View));
+            Render(pane, errorBuffer.Process("خطا در اجرای ConPTY:\r\n" + exception.Message));
         }
+    }
 
-        TerminalTextBox.Focus();
+    // The XAML view is the template: new panes copy its font and get the same handlers.
+    private TerminalView CreateTerminalView()
+    {
+        var view = new TerminalView
+        {
+            BorderThickness = TerminalTextBox.BorderThickness,
+            Padding = TerminalTextBox.Padding,
+            FontFamily = TerminalTextBox.FontFamily,
+            FontSize = TerminalTextBox.FontSize,
+            FontWeight = TerminalTextBox.FontWeight,
+            FontStyle = TerminalTextBox.FontStyle,
+            Cursor = Cursors.IBeam,
+            FlowDirection = FlowDirection.LeftToRight
+        };
+        view.SetResourceReference(BackgroundProperty, "TerminalBackgroundBrush");
+        view.SetResourceReference(ForegroundProperty, "TerminalForegroundBrush");
+        TextOptions.SetTextFormattingMode(view, TextFormattingMode.Display);
+        TextOptions.SetTextRenderingMode(view, TextRenderingMode.ClearType);
+        System.Windows.Documents.Typography.SetStandardLigatures(view, false);
+        System.Windows.Documents.Typography.SetContextualLigatures(view, false);
+        System.Windows.Documents.Typography.SetDiscretionaryLigatures(view, false);
+        System.Windows.Documents.Typography.SetKerning(view, false);
+        System.Windows.Documents.Typography.SetNumeralAlignment(view, FontNumeralAlignment.Tabular);
+        WireTerminalView(view);
+        return view;
+    }
+
+    private void WireTerminalView(TerminalView view)
+    {
+        view.LinkRequested += uri =>
+        {
+            try { Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true }); }
+            catch (Exception exception)
+            { MessageBox.Show(this, exception.Message, "Open link", MessageBoxButton.OK, MessageBoxImage.Error); }
+        };
+        view.AddHandler(ScrollViewer.ScrollChangedEvent, new ScrollChangedEventHandler(TerminalTextBox_ScrollChanged));
+        view.PreviewKeyDown += TerminalTextBox_PreviewKeyDown;
+        view.PreviewKeyUp += TerminalTextBox_PreviewKeyUp;
+        view.PreviewMouseDown += TerminalTextBox_PreviewMouseDown;
+        view.PreviewMouseUp += TerminalTextBox_PreviewMouseUp;
+        view.PreviewMouseMove += TerminalTextBox_PreviewMouseMove;
+        view.PreviewMouseWheel += TerminalTextBox_PreviewMouseWheel;
+        view.PreviewMouseRightButtonDown += TerminalTextBox_PreviewMouseRightButtonDown;
+        view.GotKeyboardFocus += TerminalTextBox_GotKeyboardFocus;
+        view.LostKeyboardFocus += TerminalTextBox_LostKeyboardFocus;
+        view.PreviewTextInput += TerminalTextBox_PreviewTextInput;
     }
 
     private void Window_Closed(object? sender, EventArgs e)
     {
-        SaveActiveTabState();
-
-        foreach (var tab in _tabs)
-            _ = tab.DisposeAsync();
+        foreach (var pane in _tabs.SelectMany(tab => tab.Panes))
+            _ = pane.DisposeAsync();
 
         CleanupTemporaryClipboardFiles();
     }
@@ -162,16 +225,21 @@ ApplySavedFontSettings();
 
     private void ApplyViewportResize()
     {
-        if (WindowState == WindowState.Minimized || _session is null || _terminalBuffer is null ||
-            _activeTab is null || TerminalTextBox.ViewportWidth <= 0 || TerminalTextBox.ViewportHeight <= 0) return;
-        var columns = GetColumns();
-        var rows = GetRows();
-        if (_activeTab.GridSize == (columns, rows)) return;
-        // Use the settled viewport, not transient window sizes during minimize/restore.
-        var snapshot = _terminalBuffer.Resize(columns, rows);
-        _session.Resize(columns, rows);
-        _activeTab.GridSize = (columns, rows);
-        QueueRender(snapshot);
+        if (WindowState == WindowState.Minimized || _activeTab is null) return;
+
+        foreach (var pane in _activeTab.Panes)
+        {
+            if (pane.Session is not { } session || pane.Buffer is not { } buffer ||
+                pane.View.ViewportWidth <= 0 || pane.View.ViewportHeight <= 0) continue;
+            var columns = GetColumns(pane.View);
+            var rows = GetRows(pane.View);
+            if (pane.GridSize == (columns, rows)) continue;
+            // Use the settled viewport, not transient window sizes during minimize/restore.
+            var snapshot = buffer.Resize(columns, rows);
+            session.Resize(columns, rows);
+            pane.GridSize = (columns, rows);
+            QueueRender(pane, snapshot);
+        }
     }
 
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
@@ -193,12 +261,33 @@ ApplySavedFontSettings();
             return;
         }
 
+        if (controlPressed && shiftPressed && e.Key == Key.D)
+        {
+            SplitActivePane();
+            e.Handled = true;
+            return;
+        }
+
+        if (controlPressed && GetEffectiveKey(e) is Key.Left or Key.Right &&
+            (Keyboard.Modifiers & ModifierKeys.Alt) != 0)
+        {
+            SelectRelativePane(GetEffectiveKey(e) == Key.Left ? -1 : 1);
+            e.Handled = true;
+            return;
+        }
+
         if (controlPressed && e.Key == Key.W)
         {
-            CloseTab(_activeTab);
+            ClosePane(ActivePane);
             e.Handled = true;
         }
     }
+
+    private void SplitPaneButton_Click(object sender, RoutedEventArgs e) => SplitActivePane();
+
+    private void SplitPaneMenuItem_Click(object sender, RoutedEventArgs e) => SplitActivePane();
+
+    private void ClosePaneMenuItem_Click(object sender, RoutedEventArgs e) => ClosePane(ActivePane);
 
     private void NewTabButton_Click(object sender, RoutedEventArgs e)
     {
@@ -265,7 +354,7 @@ ApplySavedFontSettings();
         object sender,
         RoutedEventArgs e)
     {
-        if (_terminalBuffer is null)
+        if (ActiveBuffer is null)
         {
             MessageBox.Show(
                 this,
@@ -290,7 +379,7 @@ ApplySavedFontSettings();
 
         try
         {
-            var snapshot = _terminalBuffer.CaptureSnapshot();
+            var snapshot = ActiveBuffer.CaptureSnapshot();
             File.WriteAllText(
                 dialog.FileName,
                 CreateSessionText(snapshot),
@@ -367,10 +456,10 @@ ApplySavedFontSettings();
         object sender,
         TextCompositionEventArgs e)
     {
-        if (_session is null || string.IsNullOrEmpty(e.Text))
+        if (ActiveSession is null || string.IsNullOrEmpty(e.Text))
             return;
 
-        _session.Write(e.Text);
+        ActiveSession.Write(e.Text);
         e.Handled = true;
     }
 
@@ -378,19 +467,22 @@ ApplySavedFontSettings();
         object sender,
         ScrollChangedEventArgs e)
     {
+        if (sender is not TerminalView { Tag: TerminalPane pane } view)
+            return;
+
         if ((e.ViewportWidthChange != 0 || e.ViewportHeightChange != 0) &&
-            _session is not null && _terminalBuffer is not null)
+            pane.Session is not null && pane.Buffer is not null)
         {
             QueueViewportResize();
         }
 
-        if (_restoringScrollPosition || TerminalTextBox.IsUpdatingScroll)
+        if (_restoringScrollPosition || view.IsUpdatingScroll)
             return;
 
         if (Math.Abs(e.VerticalChange) < 0.01)
             return;
 
-        _followOutput =
+        pane.FollowOutput =
             e.ExtentHeight <= e.ViewportHeight ||
             e.VerticalOffset >= e.ExtentHeight - e.ViewportHeight - 2;
     }
@@ -399,26 +491,32 @@ ApplySavedFontSettings();
         object sender,
         MouseButtonEventArgs e)
     {
-        if (IsSgrMouseTrackingEnabled() && !TerminalTextBox.HasSelection)
+        ActivatePaneOf(sender);
+        if (IsSgrMouseTrackingEnabled() && !ActiveView.HasSelection)
             return;
 
         e.Handled = true;
         _suppressRightMouseUp = true;
-        if (TerminalTextBox.HasSelection) CopySelection();
+        if (ActiveView.HasSelection) CopySelection();
         else PasteClipboard();
-        TerminalTextBox.Focus();
+        ActiveView.Focus();
     }
 
     private ContextMenu CreateTerminalContextMenu()
     {
-        var menu = new ContextMenu { Style = (Style)FindResource("DarkContextMenuStyle"), PlacementTarget = TerminalTextBox };
-        var copy = new MenuItem { Header = "_Copy", IsEnabled = TerminalTextBox.HasSelection };
+        var menu = new ContextMenu { Style = (Style)FindResource("DarkContextMenuStyle"), PlacementTarget = ActiveView };
+        var split = new MenuItem { Header = "Split side by side", InputGestureText = "Ctrl+Shift+D" };
+        split.Click += SplitPaneMenuItem_Click;
+        var closePane = new MenuItem { Header = "Close pane", InputGestureText = "Ctrl+W", IsEnabled = _activeTab?.Panes.Count > 1 };
+        closePane.Click += ClosePaneMenuItem_Click;
+        var copy = new MenuItem { Header = "_Copy", IsEnabled = ActiveView.HasSelection };
         copy.Click += (_, _) => CopySelection();
-        var paste = new MenuItem { Header = "_Paste", IsEnabled = _session is not null };
+        var paste = new MenuItem { Header = "_Paste", IsEnabled = ActiveSession is not null };
         paste.Click += (_, _) => PasteClipboard();
         var select = new MenuItem { Header = "Select _all" };
-        select.Click += (_, _) => TerminalTextBox.SelectAll();
+        select.Click += (_, _) => ActiveView.SelectAll();
         menu.Items.Add(copy); menu.Items.Add(paste); menu.Items.Add(new Separator()); menu.Items.Add(select);
+        menu.Items.Add(new Separator()); menu.Items.Add(split); menu.Items.Add(closePane);
         return menu;
     }
 
@@ -426,15 +524,16 @@ ApplySavedFontSettings();
         object sender,
         MouseButtonEventArgs e)
     {
-        if (e.ChangedButton == MouseButton.Right && TerminalTextBox.HasSelection) return;
+        ActivatePaneOf(sender);
+        if (e.ChangedButton == MouseButton.Right && ActiveView.HasSelection) return;
         var button = GetMouseButtonCode(e.ChangedButton);
 
         if (button < 0 || !SendMouseEvent(e, button, released: false))
             return;
 
         _lastReportedMouseCell = null;
-        Mouse.Capture(TerminalTextBox);
-        TerminalTextBox.Focus();
+        Mouse.Capture(ActiveView);
+        ActiveView.Focus();
         e.Handled = true;
     }
 
@@ -448,6 +547,8 @@ ApplySavedFontSettings();
             e.Handled = true;
             return;
         }
+        if (!ReferenceEquals(sender, ActiveView))
+            return;
         var button = GetMouseButtonCode(e.ChangedButton);
 
         if (button < 0 || !SendMouseEvent(e, button, released: true))
@@ -462,9 +563,10 @@ ApplySavedFontSettings();
         object sender,
         MouseEventArgs e)
     {
-        var mode = _lastRenderedSnapshot?.Modes.MouseTrackingMode ?? 0;
+        var mode = ActiveSnapshot?.Modes.MouseTrackingMode ?? 0;
 
-        if (!IsSgrMouseTrackingEnabled() ||
+        if (!ReferenceEquals(sender, ActiveView) ||
+            !IsSgrMouseTrackingEnabled() ||
             mode == 1000 ||
             mode == 1002 && e.LeftButton != MouseButtonState.Pressed &&
                 e.MiddleButton != MouseButtonState.Pressed &&
@@ -496,6 +598,10 @@ ApplySavedFontSettings();
         object sender,
         MouseWheelEventArgs e)
     {
+        // Other panes scroll their own history; only the active one talks to its program.
+        if (!ReferenceEquals(sender, ActiveView))
+            return;
+
         if (!IsSgrMouseTrackingEnabled() ||
             !TryGetMouseCell(e, out var x, out var y))
         {
@@ -510,8 +616,10 @@ ApplySavedFontSettings();
         object sender,
         KeyboardFocusChangedEventArgs e)
     {
-        if (_lastRenderedSnapshot?.Modes.FocusReporting == true)
-            _session?.Write("\x1b[I");
+        ActivatePaneOf(sender);
+        if (sender is TerminalView { Tag: TerminalPane pane } &&
+            pane.LastRenderedSnapshot?.Modes.FocusReporting == true)
+            pane.Session?.Write("\x1b[I");
     }
 
     private void TerminalTextBox_LostKeyboardFocus(
@@ -519,8 +627,10 @@ ApplySavedFontSettings();
         KeyboardFocusChangedEventArgs e)
     {
         _pendingContextMenuKey = null;
-        if (_lastRenderedSnapshot?.Modes.FocusReporting == true)
-            _session?.Write("\x1b[O");
+        // The pane losing focus may no longer be the active one after a click.
+        if (sender is TerminalView { Tag: TerminalPane pane } &&
+            pane.LastRenderedSnapshot?.Modes.FocusReporting == true)
+            pane.Session?.Write("\x1b[O");
     }
 
     private bool SendMouseEvent(
@@ -528,7 +638,7 @@ ApplySavedFontSettings();
         int button,
         bool released)
     {
-        if (button == 0 && (Keyboard.Modifiers & ModifierKeys.Control) != 0 && TerminalTextBox.IsLinkAt(e))
+        if (button == 0 && (Keyboard.Modifiers & ModifierKeys.Control) != 0 && ActiveView.IsLinkAt(e))
             return false;
         if (!IsSgrMouseTrackingEnabled() ||
             !TryGetMouseCell(e, out var x, out var y))
@@ -542,7 +652,7 @@ ApplySavedFontSettings();
 
     private void SendSgrMouse(int button, int x, int y, bool released)
     {
-        if (_session is null)
+        if (ActiveSession is null)
             return;
 
         if ((Keyboard.Modifiers & ModifierKeys.Shift) != 0)
@@ -554,15 +664,15 @@ ApplySavedFontSettings();
         if ((Keyboard.Modifiers & ModifierKeys.Control) != 0)
             button += 16;
 
-        _session.Write($"\x1b[<{button};{x};{y}{(released ? 'm' : 'M')}");
+        ActiveSession.Write($"\x1b[<{button};{x};{y}{(released ? 'm' : 'M')}");
     }
 
     private bool TryGetMouseCell(MouseEventArgs e, out int x, out int y) =>
-        TerminalTextBox.TryGetGridCell(e, out x, out y);
+        ActiveView.TryGetGridCell(e, out x, out y);
 
     private bool IsSgrMouseTrackingEnabled() =>
-        !TerminalTextBox.IsSelecting &&
-        (Keyboard.Modifiers & ModifierKeys.Shift) == 0 && _lastRenderedSnapshot?.Modes is
+        !ActiveView.IsSelecting &&
+        (Keyboard.Modifiers & ModifierKeys.Shift) == 0 && ActiveSnapshot?.Modes is
         {
             MouseTrackingMode: > 0,
             SgrMouse: true
@@ -579,10 +689,9 @@ ApplySavedFontSettings();
 
     private void SmartRtlMenuItem_Changed(object sender, RoutedEventArgs e)
     {
-        if (_lastRenderedSnapshot is not null)
-            Render(_lastRenderedSnapshot);
+        RenderVisiblePanes();
 
-        TerminalTextBox.Focus();
+        ActiveView.Focus();
     }
 
     private void FontSettingsMenuItem_Click(object sender, RoutedEventArgs e)
@@ -604,21 +713,20 @@ ApplySavedFontSettings();
         ApplyFontSettings(settingsWindow.SelectedSettings);
         AppSettings.SaveFont(settingsWindow.SelectedSettings);
         AppSettings.SaveHistorySize(settingsWindow.SelectedHistorySize);
-        TerminalTextBox.Focus();
+        ActiveView.Focus();
     }
 
     private void ApplyHistorySize(int historySize)
     {
         _historySize = historySize;
-        SaveActiveTabState();
 
-        foreach (var tab in _tabs)
+        foreach (var pane in _tabs.SelectMany(tab => tab.Panes))
         {
-            if (tab.Buffer is not { } buffer)
+            if (pane.Buffer is not { } buffer)
                 continue;
 
             QueueRender(
-                tab,
+                pane,
                 buffer.SetMaximumScrollbackRows(historySize));
         }
     }
@@ -641,8 +749,9 @@ ApplySavedFontSettings();
         AppSettings.SaveTheme(theme);
         UpdateThemeMenu();
         RebuildTabStrip();
-        TerminalTextBox.RefreshTheme();
-        TerminalTextBox.Focus();
+        foreach (var view in AllViews())
+            view.RefreshTheme();
+        ActiveView.Focus();
     }
 
     private void UpdateThemeMenu()
@@ -840,7 +949,7 @@ ApplySavedFontSettings();
         finally
         {
             RefreshContextMenuIntegrationState();
-            TerminalTextBox.Focus();
+            ActiveView.Focus();
         }
     }
 
@@ -982,50 +1091,140 @@ ApplySavedFontSettings();
         return profile;
     }
 
-    private void SaveActiveTabState()
+    private TerminalPane? ActivePane => _activeTab?.ActivePane;
+    private TerminalView ActiveView => ActivePane?.View ?? TerminalTextBox;
+    private ConPtySession? ActiveSession => ActivePane?.Session;
+    private TerminalBuffer? ActiveBuffer => ActivePane?.Buffer;
+    private TerminalSnapshot? ActiveSnapshot => ActivePane?.LastRenderedSnapshot;
+
+    private IEnumerable<TerminalView> AllViews() =>
+        _tabs.SelectMany(tab => tab.Panes).Select(pane => pane.View)
+            .Append(TerminalTextBox).Distinct();
+
+    private void ShowTab(TerminalTab tab)
+    {
+        StorePaneWidths();
+        _activeTab = tab;
+        LayoutPanes();
+        RebuildTabStrip();
+        RenderVisiblePanes();
+        QueueViewportResize();
+    }
+
+    // Keep widths the user dragged with a splitter when the panes are laid out again.
+    private void StorePaneWidths()
+    {
+        if (_activeTab is null || PaneHost.ColumnDefinitions.Count != _activeTab.Panes.Count * 2 - 1)
+            return;
+
+        for (var index = 0; index < _activeTab.Panes.Count; index++)
+        {
+            var width = PaneHost.ColumnDefinitions[index * 2].ActualWidth;
+            if (width > 0)
+                _activeTab.Panes[index].Width = width;
+        }
+    }
+
+    // Panes sit side by side in star columns, with a splitter between each pair.
+    private void LayoutPanes()
+    {
+        foreach (var tab in _tabs)
+        {
+            foreach (var pane in tab.Panes)
+            {
+                if (pane.IsShown)
+                    pane.VerticalOffset = pane.View.VerticalOffset;
+                lock (_renderLock)
+                    pane.IsShown = ReferenceEquals(tab, _activeTab);
+            }
+        }
+
+        PaneHost.Children.Clear();
+        PaneHost.ColumnDefinitions.Clear();
+        if (_activeTab is null)
+            return;
+
+        var split = _activeTab.Panes.Count > 1;
+        foreach (var pane in _activeTab.Panes)
+        {
+            if (PaneHost.ColumnDefinitions.Count > 0)
+            {
+                PaneHost.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                var splitter = new GridSplitter
+                {
+                    Width = 5,
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    ResizeBehavior = GridResizeBehavior.PreviousAndNext,
+                    ResizeDirection = GridResizeDirection.Columns,
+                    Focusable = false
+                };
+                splitter.SetResourceReference(BackgroundProperty, "ToolbarBorderBrush");
+                splitter.DragCompleted += (_, _) => QueueViewportResize();
+                Grid.SetColumn(splitter, PaneHost.ColumnDefinitions.Count - 1);
+                PaneHost.Children.Add(splitter);
+            }
+
+            PaneHost.ColumnDefinitions.Add(new ColumnDefinition
+            {
+                Width = new GridLength(Math.Max(1, pane.Width), GridUnitType.Star),
+                MinWidth = 120
+            });
+            pane.Frame.BorderThickness = new Thickness(split ? 1 : 0);
+            if (pane.View.Parent is Panel panel)
+                panel.Children.Remove(pane.View);
+            pane.Frame.Child = pane.View;
+            Grid.SetColumn(pane.Frame, PaneHost.ColumnDefinitions.Count - 1);
+            PaneHost.Children.Add(pane.Frame);
+
+            if (!pane.FollowOutput)
+            {
+                var view = pane.View;
+                var offset = pane.VerticalOffset;
+                Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => view.ScrollToVerticalOffset(offset));
+            }
+        }
+
+        UpdatePaneFrames();
+    }
+
+    private void UpdatePaneFrames()
     {
         if (_activeTab is null)
             return;
 
-        _activeTab.Session = _session;
-        _activeTab.Buffer = _terminalBuffer;
-        _activeTab.CancellationTokenSource = _cancellationTokenSource;
-        _activeTab.PendingSnapshot = _pendingSnapshot;
-        _activeTab.RenderStartQueued = _renderStartQueued;
-        _activeTab.LatestQueuedRevision = _latestQueuedRevision;
-        _activeTab.LastRenderedSnapshot = _lastRenderedSnapshot;
-        _activeTab.Selection = TerminalTextBox.SelectionState;
-_activeTab.RenderedSmartRtlEnabled = _renderedSmartRtlEnabled;
-        _activeTab.FollowOutput = _followOutput;
-
-        var scrollViewer = FindVisualChild<ScrollViewer>(TerminalTextBox);
-        _activeTab.VerticalOffset = scrollViewer?.VerticalOffset ?? 0;
+        foreach (var pane in _activeTab.Panes)
+        {
+            pane.Frame.SetResourceReference(Border.BorderBrushProperty,
+                ReferenceEquals(pane, _activeTab.ActivePane) ? "AccentBrush" : "TerminalBackgroundBrush");
+        }
     }
 
-    private void LoadTabState(TerminalTab tab)
+    private void ActivatePaneOf(object sender)
     {
-        lock (_renderLock)
-        {
-            _session = tab.Session;
-            _terminalBuffer = tab.Buffer;
-            _cancellationTokenSource = tab.CancellationTokenSource;
-            _pendingSnapshot = tab.PendingSnapshot;
-            _renderStartQueued = tab.RenderStartQueued;
-            _latestQueuedRevision = tab.LatestQueuedRevision;
-        }
+        if (sender is TerminalView { Tag: TerminalPane pane })
+            ActivatePane(pane);
+    }
 
-        _lastRenderedSnapshot = tab.LastRenderedSnapshot;
-        _renderedSmartRtlEnabled = tab.RenderedSmartRtlEnabled;
-        _followOutput = tab.FollowOutput;
+    private void ActivatePane(TerminalPane pane)
+    {
+        if (_activeTab is null || ReferenceEquals(pane, _activeTab.ActivePane) ||
+            !_activeTab.Panes.Contains(pane))
+            return;
 
-        TerminalTextBox.Clear();
-        if (tab.LastRenderedSnapshot is { } snapshot)
-        {
-            TerminalTextBox.Present(snapshot, SmartRtlMenuItem.IsChecked,
-                _cellWidth, _lineHeight, false, RowRtlMenuItem.IsChecked);
-            TerminalTextBox.ScrollToVerticalOffset(tab.VerticalOffset);
-            TerminalTextBox.SelectionState = tab.Selection;
-        }
+        _activeTab.ActivePane = pane;
+        UpdatePaneFrames();
+        RebuildTabStrip();
+        if (!pane.View.IsKeyboardFocusWithin)
+            pane.View.Focus();
+    }
+
+    private void SelectRelativePane(int direction)
+    {
+        if (_activeTab is not { Panes.Count: > 1 } tab)
+            return;
+
+        var index = tab.Panes.IndexOf(tab.ActivePane);
+        ActivatePane(tab.Panes[(index + direction + tab.Panes.Count) % tab.Panes.Count]);
     }
 
     private void SelectTab(TerminalTab tab)
@@ -1033,20 +1232,8 @@ _activeTab.RenderedSmartRtlEnabled = _renderedSmartRtlEnabled;
         if (ReferenceEquals(tab, _activeTab))
             return;
 
-        SaveActiveTabState();
-        _activeTab = tab;
-        LoadTabState(tab);
-        RebuildTabStrip();
-
-        if (_pendingSnapshot is not null)
-            StartRenderTimer();
-        else if (_lastRenderedSnapshot is not null &&
-            (_renderedSmartRtlEnabled != SmartRtlMenuItem.IsChecked))
-        {
-            Render(_lastRenderedSnapshot);
-        }
-
-        TerminalTextBox.Focus();
+        ShowTab(tab);
+        ActiveView.Focus();
     }
 
     private void SelectRelativeTab(int direction)
@@ -1059,6 +1246,36 @@ _activeTab.RenderedSmartRtlEnabled = _renderedSmartRtlEnabled;
         SelectTab(_tabs[nextIndex]);
     }
 
+    private void ClosePane(TerminalPane? pane)
+    {
+        if (pane is null || _tabs.FirstOrDefault(tab => tab.Panes.Contains(pane)) is not { } tab)
+            return;
+
+        if (tab.Panes.Count == 1)
+        {
+            CloseTab(tab);
+            return;
+        }
+
+        StorePaneWidths();
+        var index = tab.Panes.IndexOf(pane);
+        tab.Panes.RemoveAt(index);
+        // The neighbour takes over the closed pane's width.
+        tab.Panes[Math.Max(0, index - 1)].Width += pane.Width;
+        if (ReferenceEquals(tab.ActivePane, pane))
+            tab.ActivePane = tab.Panes[Math.Max(0, index - 1)];
+
+        if (ReferenceEquals(tab, _activeTab))
+        {
+            LayoutPanes();
+            QueueViewportResize();
+            ActiveView.Focus();
+        }
+
+        RebuildTabStrip();
+        _ = pane.DisposeAsync();
+    }
+
     private void CloseTab(TerminalTab? tab)
     {
         if (tab is null)
@@ -1069,32 +1286,29 @@ _activeTab.RenderedSmartRtlEnabled = _renderedSmartRtlEnabled;
         if (index < 0)
             return;
 
-        if (ReferenceEquals(tab, _activeTab))
-            SaveActiveTabState();
-
         var wasActive = ReferenceEquals(tab, _activeTab);
         _tabs.RemoveAt(index);
 
         if (_tabs.Count == 0)
         {
             _activeTab = null;
-            _session = null;
-            _terminalBuffer = null;
-            _cancellationTokenSource = null;
-            _ = tab.DisposeAsync();
+            foreach (var pane in tab.Panes)
+                _ = pane.DisposeAsync();
             Close();
             return;
         }
 
         if (wasActive)
         {
-            _activeTab = _tabs[Math.Min(index, _tabs.Count - 1)];
-            LoadTabState(_activeTab);
+            _activeTab = null;
+            ShowTab(_tabs[Math.Min(index, _tabs.Count - 1)]);
         }
+        else
+            RebuildTabStrip();
 
-        RebuildTabStrip();
-        TerminalTextBox.Focus();
-        _ = tab.DisposeAsync();
+        ActiveView.Focus();
+        foreach (var pane in tab.Panes)
+            _ = pane.DisposeAsync();
     }
 
     private void RebuildTabStrip()
@@ -1171,7 +1385,7 @@ _activeTab.RenderedSmartRtlEnabled = _renderedSmartRtlEnabled;
 
     private void TitleTabsHost_SizeChanged(object sender, SizeChangedEventArgs e)
     {
-        TabScroller.MaxWidth = Math.Max(0, e.NewSize.Width - 66);
+        TabScroller.MaxWidth = Math.Max(0, e.NewSize.Width - 98);
     }
 
     private void TabScroller_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
@@ -1205,7 +1419,7 @@ _activeTab.RenderedSmartRtlEnabled = _renderedSmartRtlEnabled;
             e.Handled = true;
             return;
         }
-        if (_session is null)
+        if (ActiveSession is null)
             return;
 
         var controlPressed = (Keyboard.Modifiers & ModifierKeys.Control) != 0;
@@ -1227,10 +1441,10 @@ _activeTab.RenderedSmartRtlEnabled = _renderedSmartRtlEnabled;
 
         if (controlPressed && e.Key == Key.C)
         {
-            if (TerminalTextBox.HasSelection)
+            if (ActiveView.HasSelection)
                 CopySelection();
             else
-                _session.Write("\x03");
+                ActiveSession.Write("\x03");
 
             e.Handled = true;
             return;
@@ -1245,14 +1459,14 @@ _activeTab.RenderedSmartRtlEnabled = _renderedSmartRtlEnabled;
 
         if (controlPressed && GetEffectiveKey(e) == Key.Space)
         {
-            _session.Write("\0");
+            ActiveSession.Write("\0");
             e.Handled = true;
             return;
         }
 
         if (controlPressed && shiftPressed && e.Key == Key.A)
         {
-            TerminalTextBox.SelectAll();
+            ActiveView.SelectAll();
             e.Handled = true;
             return;
         }
@@ -1260,7 +1474,7 @@ _activeTab.RenderedSmartRtlEnabled = _renderedSmartRtlEnabled;
         if (controlPressed && e.Key >= Key.A && e.Key <= Key.Z)
         {
             var controlCharacter = (char)(e.Key - Key.A + 1);
-            _session.Write(controlCharacter.ToString());
+            ActiveSession.Write(controlCharacter.ToString());
             e.Handled = true;
             return;
         }
@@ -1271,7 +1485,7 @@ _activeTab.RenderedSmartRtlEnabled = _renderedSmartRtlEnabled;
             InputLanguageManager.Current.CurrentInputLanguage
                 .TwoLetterISOLanguageName == "fa")
         {
-            _session.Write("\u061f");
+            ActiveSession.Write("\u061f");
             e.Handled = true;
             return;
         }
@@ -1283,12 +1497,12 @@ _activeTab.RenderedSmartRtlEnabled = _renderedSmartRtlEnabled;
             shiftPressed,
             altPressed,
             controlPressed,
-            _lastRenderedSnapshot?.Modes.ApplicationCursorKeys == true);
+            ActiveSnapshot?.Modes.ApplicationCursorKeys == true);
 
         if (sequence is null)
             return;
 
-        _session.Write(sequence);
+        ActiveSession.Write(sequence);
         e.Handled = true;
     }
 
@@ -1307,10 +1521,10 @@ _activeTab.RenderedSmartRtlEnabled = _renderedSmartRtlEnabled;
         e.Handled = true;
         Dispatcher.BeginInvoke(DispatcherPriority.Input, () =>
         {
-            if (!TerminalTextBox.IsKeyboardFocusWithin) return;
+            if (!ActiveView.IsKeyboardFocusWithin) return;
             var menu = CreateTerminalContextMenu();
             menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Center;
-            menu.Closed += (_, _) => TerminalTextBox.Focus();
+            menu.Closed += (_, _) => ActiveView.Focus();
             menu.IsOpen = true;
         });
     }
@@ -1397,10 +1611,10 @@ _activeTab.RenderedSmartRtlEnabled = _renderedSmartRtlEnabled;
 
     private void CopySelection()
     {
-        if (!TerminalTextBox.HasSelection)
+        if (!ActiveView.HasSelection)
             return;
 
-        try { TerminalTextBox.CopySelection(); }
+        try { ActiveView.CopySelection(); }
         catch (System.Runtime.InteropServices.ExternalException)
         {
             MessageBox.Show(this, "The clipboard is busy. Please try copying again.", "Clipboard", MessageBoxButton.OK, MessageBoxImage.Information);
@@ -1418,7 +1632,7 @@ _activeTab.RenderedSmartRtlEnabled = _renderedSmartRtlEnabled;
 
     private void PasteClipboardCore()
     {
-        if (_session is null)
+        if (ActiveSession is null)
             return;
 
         if (Clipboard.ContainsFileDropList())
@@ -1458,7 +1672,7 @@ _activeTab.RenderedSmartRtlEnabled = _renderedSmartRtlEnabled;
 
     private void WriteClipboardPaths(IReadOnlyList<string> paths)
     {
-        if (_session is null || paths.Count == 0)
+        if (ActiveSession is null || paths.Count == 0)
             return;
 
         var formattedPaths = new StringBuilder();
@@ -1476,13 +1690,13 @@ _activeTab.RenderedSmartRtlEnabled = _renderedSmartRtlEnabled;
 
     private void WritePastedText(string text)
     {
-        if (_session is null || string.IsNullOrEmpty(text))
+        if (ActiveSession is null || string.IsNullOrEmpty(text))
             return;
 
-        if (_lastRenderedSnapshot?.Modes.BracketedPaste == true)
-            _session.Write($"\x1b[200~{text}\x1b[201~");
+        if (ActiveSnapshot?.Modes.BracketedPaste == true)
+            ActiveSession.Write($"\x1b[200~{text}\x1b[201~");
         else
-            _session.Write(text);
+            ActiveSession.Write(text);
     }
 
     private string FormatClipboardPath(string path)
@@ -1535,11 +1749,11 @@ _activeTab.RenderedSmartRtlEnabled = _renderedSmartRtlEnabled;
         _temporaryClipboardFiles.Clear();
     }
 
-    private void ReadOutputLoop(TerminalTab tab)
+    private void ReadOutputLoop(TerminalPane pane)
     {
-        var session = tab.Session;
-        var buffer = tab.Buffer;
-        var cancellationTokenSource = tab.CancellationTokenSource;
+        var session = pane.Session;
+        var buffer = pane.Buffer;
+        var cancellationTokenSource = pane.CancellationTokenSource;
 
         if (session is null ||
             buffer is null ||
@@ -1589,56 +1803,41 @@ _activeTab.RenderedSmartRtlEnabled = _renderedSmartRtlEnabled;
                 session.Write(response);
 
             if (snapshot.Modes.SynchronizedOutput)
-                SuspendRendering(tab, snapshot.Revision);
+                SuspendRendering(pane, snapshot.Revision);
             else
-                QueueRender(tab, snapshot);
+                QueueRender(pane, snapshot);
         }
     }
 
-    private void SuspendRendering(TerminalTab tab, long revision)
+    private void SuspendRendering(TerminalPane pane, long revision)
     {
         lock (_renderLock)
         {
-            tab.LatestQueuedRevision = Math.Max(
-                tab.LatestQueuedRevision,
+            pane.LatestQueuedRevision = Math.Max(
+                pane.LatestQueuedRevision,
                 revision);
-            tab.PendingSnapshot = null;
-
-            if (!ReferenceEquals(tab, _activeTab))
-                return;
-
-            _latestQueuedRevision = tab.LatestQueuedRevision;
-            _pendingSnapshot = null;
+            pane.PendingSnapshot = null;
         }
     }
 
-    private void QueueRender(TerminalSnapshot snapshot)
-    {
-        if (_activeTab is not null)
-            QueueRender(_activeTab, snapshot);
-    }
-
-    private void QueueRender(TerminalTab tab, TerminalSnapshot snapshot)
+    private void QueueRender(TerminalPane pane, TerminalSnapshot snapshot)
     {
         lock (_renderLock)
         {
-            if (snapshot.Revision < tab.LatestQueuedRevision)
+            if (snapshot.Revision < pane.LatestQueuedRevision)
                 return;
 
-            tab.LatestQueuedRevision = snapshot.Revision;
-            tab.PendingSnapshot = snapshot;
+            pane.LatestQueuedRevision = snapshot.Revision;
+            pane.PendingSnapshot = snapshot;
 
-            if (!ReferenceEquals(tab, _activeTab))
+            // Panes of hidden tabs are drawn when their tab is shown again.
+            if (!pane.IsShown)
                 return;
-
-            _latestQueuedRevision = tab.LatestQueuedRevision;
-            _pendingSnapshot = tab.PendingSnapshot;
 
             if (_renderTimer.IsEnabled || _renderStartQueued)
                 return;
 
             _renderStartQueued = true;
-            tab.RenderStartQueued = true;
         }
 
         Dispatcher.BeginInvoke(
@@ -1649,11 +1848,7 @@ _activeTab.RenderedSmartRtlEnabled = _renderedSmartRtlEnabled;
     private void StartRenderTimer()
     {
         lock (_renderLock)
-        {
             _renderStartQueued = false;
-            if (_activeTab is not null)
-                _activeTab.RenderStartQueued = false;
-        }
 
         if (!_renderTimer.IsEnabled)
             _renderTimer.Start();
@@ -1661,34 +1856,54 @@ _activeTab.RenderedSmartRtlEnabled = _renderedSmartRtlEnabled;
 
     private void RenderTimer_Tick(object? sender, EventArgs e)
     {
-        TerminalSnapshot? snapshot;
+        var panes = _activeTab?.Panes.ToArray() ?? [];
 
-        lock (_renderLock)
+        foreach (var pane in panes)
         {
-            snapshot = _pendingSnapshot;
-            _pendingSnapshot = null;
+            TerminalSnapshot? snapshot;
 
-            if (_activeTab is not null)
-                _activeTab.PendingSnapshot = null;
+            lock (_renderLock)
+            {
+                snapshot = pane.PendingSnapshot;
+                pane.PendingSnapshot = null;
+            }
+
+            if (snapshot is not null)
+                Render(pane, snapshot);
         }
 
-        if (snapshot is not null)
-            Render(snapshot);
-
         lock (_renderLock)
         {
-            if (_pendingSnapshot is null)
+            if (panes.All(pane => pane.PendingSnapshot is null))
                 _renderTimer.Stop();
         }
     }
 
-    private void Render(TerminalSnapshot snapshot)
+    // Draws pending output, or redraws the last frame so view settings take effect.
+    private void RenderVisiblePanes()
     {
-        _lastRenderedSnapshot = snapshot;
-        _renderedSmartRtlEnabled = SmartRtlMenuItem.IsChecked;
+        if (_activeTab is null)
+            return;
+
+        foreach (var pane in _activeTab.Panes)
+        {
+            bool pending;
+            lock (_renderLock)
+                pending = pane.PendingSnapshot is not null;
+
+            if (pending)
+                StartRenderTimer();
+            else if (pane.LastRenderedSnapshot is { } snapshot)
+                Render(pane, snapshot);
+        }
+    }
+
+    private void Render(TerminalPane pane, TerminalSnapshot snapshot)
+    {
+        pane.LastRenderedSnapshot = snapshot;
         _restoringScrollPosition = true;
-        TerminalTextBox.Present(snapshot, SmartRtlMenuItem.IsChecked,
-            _cellWidth, _lineHeight, _followOutput, RowRtlMenuItem.IsChecked);
+        pane.View.Present(snapshot, SmartRtlMenuItem.IsChecked,
+            _cellWidth, _lineHeight, pane.FollowOutput, RowRtlMenuItem.IsChecked);
         _restoringScrollPosition = false;
     }
 
@@ -1702,26 +1917,25 @@ _activeTab.RenderedSmartRtlEnabled = _renderedSmartRtlEnabled;
 
     private void ApplyFontSettings(TerminalFontSettings settings)
     {
-        TerminalTextBox.FontFamily = new FontFamily(settings.Family);
-        TerminalTextBox.FontSize = settings.Size;
-        TerminalTextBox.FontWeight = settings.Bold
-            ? FontWeights.Bold
-            : FontWeights.Normal;
-        TerminalTextBox.FontStyle = settings.Italic
-            ? FontStyles.Italic
-            : FontStyles.Normal;
-        UpdateFontMetrics();
-
-
-        if (_session is not null && _terminalBuffer is not null)
+        foreach (var view in AllViews())
         {
-            QueueViewportResize();
-            if (_lastRenderedSnapshot is not null) Render(_lastRenderedSnapshot);
-            return;
+            view.FontFamily = new FontFamily(settings.Family);
+            view.FontSize = settings.Size;
+            view.FontWeight = settings.Bold
+                ? FontWeights.Bold
+                : FontWeights.Normal;
+            view.FontStyle = settings.Italic
+                ? FontStyles.Italic
+                : FontStyles.Normal;
         }
 
-        if (_lastRenderedSnapshot is not null)
-            Render(_lastRenderedSnapshot);
+        UpdateFontMetrics();
+        // Hidden tabs get the new grid size when they are shown again.
+        foreach (var pane in _tabs.SelectMany(tab => tab.Panes))
+            pane.GridSize = default;
+
+        QueueViewportResize();
+        RenderVisiblePanes();
     }
 
     private void UpdateFontMetrics()
@@ -1747,41 +1961,20 @@ _activeTab.RenderedSmartRtlEnabled = _renderedSmartRtlEnabled;
             measurement.Height + 2) * pixelsPerDip) / pixelsPerDip;
     }
 
-    private short GetColumns()
+    private short GetColumns(TerminalView view)
     {
-        var width = TerminalTextBox.ViewportWidth > 0
-            ? TerminalTextBox.ViewportWidth
-            : TerminalTextBox.ActualWidth - TerminalTextBox.Padding.Left - TerminalTextBox.Padding.Right - 18;
+        var width = view.ViewportWidth > 0
+            ? view.ViewportWidth
+            : view.ActualWidth - view.Padding.Left - view.Padding.Right - 18;
         return (short)Math.Clamp((int)Math.Floor(Math.Max(80, width) / _cellWidth), 10, 300);
     }
 
-    private short GetRows()
+    private short GetRows(TerminalView view)
     {
-        var height = TerminalTextBox.ViewportHeight > 0
-            ? TerminalTextBox.ViewportHeight
-            : TerminalTextBox.ActualHeight - TerminalTextBox.Padding.Top - TerminalTextBox.Padding.Bottom;
+        var height = view.ViewportHeight > 0
+            ? view.ViewportHeight
+            : view.ActualHeight - view.Padding.Top - view.Padding.Bottom;
         return (short)Math.Clamp((int)Math.Floor(Math.Max(120, height) / _lineHeight), 10, 100);
-    }
-
-    private static T? FindVisualChild<T>(DependencyObject parent)
-        where T : DependencyObject
-    {
-        for (var index = 0;
-             index < VisualTreeHelper.GetChildrenCount(parent);
-             index++)
-        {
-            var child = VisualTreeHelper.GetChild(parent, index);
-
-            if (child is T match)
-                return match;
-
-            var descendant = FindVisualChild<T>(child);
-
-            if (descendant is not null)
-                return descendant;
-        }
-
-        return null;
     }
 
     private enum TerminalProfile
@@ -1791,7 +1984,16 @@ _activeTab.RenderedSmartRtlEnabled = _renderedSmartRtlEnabled;
         Wsl
     }
 
-    private sealed class TerminalTab(
+    // A tab in the title bar: one or more panes shown side by side.
+    private sealed class TerminalTab(TerminalPane pane)
+    {
+        public List<TerminalPane> Panes { get; } = [pane];
+        public TerminalPane ActivePane { get; set; } = pane;
+        public TerminalProfile Profile => ActivePane.Profile;
+        public string Title => Panes.Count > 1 ? $"{ActivePane.Title} (+{Panes.Count - 1})" : ActivePane.Title;
+    }
+
+    private sealed class TerminalPane(
         int number,
         TerminalProfile profile,
         string profileTitle)
@@ -1801,15 +2003,16 @@ _activeTab.RenderedSmartRtlEnabled = _renderedSmartRtlEnabled;
         public int Number { get; } = number;
         public TerminalProfile Profile { get; } = profile;
         public string Title { get; } = $"{profileTitle} {number}";
+        public TerminalView View { get; set; } = null!;
+        public Border Frame { get; } = new();
+        public double Width { get; set; } = 1;
+        public bool IsShown { get; set; }
         public ConPtySession? Session { get; set; }
         public TerminalBuffer? Buffer { get; set; }
         public CancellationTokenSource? CancellationTokenSource { get; set; }
         public TerminalSnapshot? PendingSnapshot { get; set; }
-        public bool RenderStartQueued { get; set; }
         public long LatestQueuedRevision { get; set; }
         public TerminalSnapshot? LastRenderedSnapshot { get; set; }
-        public ((int Row, int Offset)? Anchor, (int Row, int Offset)? End) Selection { get; set; }
-        public bool RenderedSmartRtlEnabled { get; set; } = true;
         public bool FollowOutput { get; set; } = true;
         public (short Columns, short Rows) GridSize { get; set; }
         public double VerticalOffset { get; set; }
