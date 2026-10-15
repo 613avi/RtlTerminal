@@ -509,6 +509,8 @@ ApplySavedFontSettings();
         split.Click += SplitPaneMenuItem_Click;
         var closePane = new MenuItem { Header = "Close pane", InputGestureText = "Ctrl+W", IsEnabled = _activeTab?.Panes.Count > 1 };
         closePane.Click += ClosePaneMenuItem_Click;
+        var movePane = new MenuItem { Header = "Move pane to a new tab", IsEnabled = _activeTab?.Panes.Count > 1 };
+        movePane.Click += MovePaneMenuItem_Click;
         var copy = new MenuItem { Header = "_Copy", IsEnabled = ActiveView.HasSelection };
         copy.Click += (_, _) => CopySelection();
         var paste = new MenuItem { Header = "_Paste", IsEnabled = ActiveSession is not null };
@@ -516,7 +518,7 @@ ApplySavedFontSettings();
         var select = new MenuItem { Header = "Select _all" };
         select.Click += (_, _) => ActiveView.SelectAll();
         menu.Items.Add(copy); menu.Items.Add(paste); menu.Items.Add(new Separator()); menu.Items.Add(select);
-        menu.Items.Add(new Separator()); menu.Items.Add(split); menu.Items.Add(closePane);
+        menu.Items.Add(new Separator()); menu.Items.Add(split); menu.Items.Add(movePane); menu.Items.Add(closePane);
         return menu;
     }
 
@@ -1257,10 +1259,17 @@ ApplySavedFontSettings();
             return;
         }
 
+        DetachPane(tab, pane);
+        RebuildTabStrip();
+        _ = pane.DisposeAsync();
+    }
+
+    private void DetachPane(TerminalTab tab, TerminalPane pane)
+    {
         StorePaneWidths();
         var index = tab.Panes.IndexOf(pane);
         tab.Panes.RemoveAt(index);
-        // The neighbour takes over the closed pane's width.
+        // The neighbour takes over the removed pane's width.
         tab.Panes[Math.Max(0, index - 1)].Width += pane.Width;
         if (ReferenceEquals(tab.ActivePane, pane))
             tab.ActivePane = tab.Panes[Math.Max(0, index - 1)];
@@ -1271,10 +1280,74 @@ ApplySavedFontSettings();
             QueueViewportResize();
             ActiveView.Focus();
         }
-
-        RebuildTabStrip();
-        _ = pane.DisposeAsync();
     }
+
+    // Moves every pane of another tab to the right of the current tab's panes.
+    private void JoinTab(TerminalTab? source)
+    {
+        if (source is null || _activeTab is not { } target || ReferenceEquals(source, target))
+            return;
+
+        StorePaneWidths();
+        var width = target.Panes.Average(pane => pane.Width);
+        foreach (var pane in source.Panes)
+        {
+            pane.Width = width;
+            target.Panes.Add(pane);
+        }
+
+        _tabs.Remove(source);
+        LayoutPanes();
+        RebuildTabStrip();
+        RenderVisiblePanes();
+        QueueViewportResize();
+        ActiveView.Focus();
+    }
+
+    private void MovePaneToNewTab(TerminalPane? pane)
+    {
+        if (pane is null || _activeTab is not { Panes.Count: > 1 } tab || !tab.Panes.Contains(pane))
+            return;
+
+        DetachPane(tab, pane);
+        pane.Width = 1;
+        var newTab = new TerminalTab(pane);
+        _tabs.Insert(_tabs.IndexOf(tab) + 1, newTab);
+        ShowTab(newTab);
+        ActiveView.Focus();
+    }
+
+    private ContextMenu CreateTabContextMenu(TerminalTab tab)
+    {
+        var menu = new ContextMenu { Style = (Style)FindResource("DarkContextMenuStyle") };
+        var join = new MenuItem
+        {
+            Header = "Show side by side with the current tab",
+            IsEnabled = !ReferenceEquals(tab, _activeTab)
+        };
+        join.Click += (_, _) => JoinTab(tab);
+        var close = new MenuItem { Header = "Close tab" };
+        close.Click += (_, _) => CloseTab(tab);
+        menu.Items.Add(join); menu.Items.Add(new Separator()); menu.Items.Add(close);
+        return menu;
+    }
+
+    private void JoinTabMenuItem_SubmenuOpened(object sender, RoutedEventArgs e)
+    {
+        JoinTabMenuItem.Items.Clear();
+
+        foreach (var tab in _tabs.Where(tab => !ReferenceEquals(tab, _activeTab)))
+        {
+            var item = new MenuItem { Header = tab.Title };
+            item.Click += (_, _) => JoinTab(tab);
+            JoinTabMenuItem.Items.Add(item);
+        }
+
+        if (JoinTabMenuItem.Items.Count == 0)
+            JoinTabMenuItem.Items.Add(new MenuItem { Header = "No other tabs", IsEnabled = false });
+    }
+
+    private void MovePaneMenuItem_Click(object sender, RoutedEventArgs e) => MovePaneToNewTab(ActivePane);
 
     private void CloseTab(TerminalTab? tab)
     {
@@ -1359,6 +1432,7 @@ ApplySavedFontSettings();
             };
             System.Windows.Automation.AutomationProperties.SetName(selectButton, tab.Title);
             selectButton.Click += TabButton_Click;
+            selectButton.ContextMenu = CreateTabContextMenu(tab);
             panel.Children.Add(selectButton);
             var grid = new Grid { Width = 220, Height = 38, Margin = new Thickness(0, 8, 0, 0) };
             var activeBrush = new SolidColorBrush(AppTheme.ActiveTab);

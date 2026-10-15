@@ -508,6 +508,12 @@
             <MenuItem Header="_View">
                 <MenuItem Header="Split _side by side" InputGestureText="Ctrl+Shift+D"
                           Click="SplitPaneMenuItem_Click" />
+                <MenuItem x:Name="JoinTabMenuItem" Header="Show _tab side by side"
+                          SubmenuOpened="JoinTabMenuItem_SubmenuOpened">
+                    <MenuItem Header="No other tabs" IsEnabled="False" />
+                </MenuItem>
+                <MenuItem Header="_Move pane to a new tab"
+                          Click="MovePaneMenuItem_Click" />
                 <MenuItem Header="Close _pane" InputGestureText="Ctrl+W"
                           Click="ClosePaneMenuItem_Click" />
                 <Separator />
