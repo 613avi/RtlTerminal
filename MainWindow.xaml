@@ -422,6 +422,13 @@
                             HorizontalContentAlignment="Center" ToolTip="New terminal (Ctrl+Shift+T)"
                             Style="{StaticResource ChromeRoundButtonStyle}" Click="NewTabButton_Click"
                             AutomationProperties.Name="New terminal" />
+                    <Button x:Name="SplitPaneButton" Width="32" Height="30" FontSize="14"
+                            HorizontalContentAlignment="Center" ToolTip="Split side by side (Ctrl+Shift+D)"
+                            Style="{StaticResource ChromeRoundButtonStyle}" Click="SplitPaneButton_Click"
+                            AutomationProperties.Name="Split side by side">
+                        <Path Width="14" Height="12" Data="M0.5,0.5 L13.5,0.5 13.5,11.5 0.5,11.5 Z M7,0.5 L7,11.5" StrokeThickness="1"
+                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+                    </Button>
                     <Button x:Name="ProfileMenuButton" Width="26" Height="30" Content="⌄" FontSize="14"
                             HorizontalContentAlignment="Center" ToolTip="Terminal profiles"
                             Style="{StaticResource DarkTitleButtonStyle}" Click="ProfileMenuButton_Click"
@@ -502,6 +509,11 @@
                           Click="FontSettingsMenuItem_Click" />
             </MenuItem>
             <MenuItem Header="_View">
+                <MenuItem Header="Split _side by side" InputGestureText="Ctrl+Shift+D"
+                          Click="SplitPaneMenuItem_Click" />
+                <MenuItem Header="Close _pane" InputGestureText="Ctrl+W"
+                          Click="ClosePaneMenuItem_Click" />
+                <Separator />
                 <MenuItem Header="_Language">
                     <MenuItem x:Name="EnglishMenuItem" Header="English" IsCheckable="True"
                               Click="LanguageMenuItem_Click" />
@@ -553,6 +565,7 @@
         </DockPanel>
         </Border>
 
+        <Grid x:Name="PaneHost">
         <local:TerminalView x:Name="TerminalTextBox"
                      Background="{DynamicResource TerminalBackgroundBrush}"
                      Foreground="{DynamicResource TerminalForegroundBrush}"
@@ -568,18 +581,8 @@
                      Typography.ContextualLigatures="False"
                      Typography.DiscretionaryLigatures="False"
                      Typography.Kerning="False"
-                     Typography.NumeralAlignment="Tabular"
-                     ScrollViewer.ScrollChanged="TerminalTextBox_ScrollChanged"
-                     PreviewKeyDown="TerminalTextBox_PreviewKeyDown"
-                     PreviewKeyUp="TerminalTextBox_PreviewKeyUp"
-                     PreviewMouseDown="TerminalTextBox_PreviewMouseDown"
-                     PreviewMouseUp="TerminalTextBox_PreviewMouseUp"
-                     PreviewMouseMove="TerminalTextBox_PreviewMouseMove"
-                     PreviewMouseWheel="TerminalTextBox_PreviewMouseWheel"
-                     PreviewMouseRightButtonDown="TerminalTextBox_PreviewMouseRightButtonDown"
-                     GotKeyboardFocus="TerminalTextBox_GotKeyboardFocus"
-                     LostKeyboardFocus="TerminalTextBox_LostKeyboardFocus"
-                     PreviewTextInput="TerminalTextBox_PreviewTextInput" />
+                     Typography.NumeralAlignment="Tabular" />
+        </Grid>
     </DockPanel>
     </Border>
 </Window>

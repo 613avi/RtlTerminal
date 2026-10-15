@@ -282,7 +282,7 @@ internal static class Program
             throw new Exception("Blank or hidden text was detected as a link");
         var factory = typeof(MainWindow).GetMethod("CreateTerminalContextMenu", flags)!;
         var menu = (System.Windows.Controls.ContextMenu)factory.Invoke(window, null)!;
-        if (menu.Items.Count != 4 || ((System.Windows.Controls.MenuItem)menu.Items[0]).IsEnabled)
+        if (menu.Items.Count != 7 || ((System.Windows.Controls.MenuItem)menu.Items[0]).IsEnabled)
             throw new Exception("Context menu copy state is incorrect without selection");
         view.SelectAll();
         menu = (System.Windows.Controls.ContextMenu)factory.Invoke(window, null)!;
@@ -301,13 +301,14 @@ internal static class Program
         const System.Reflection.BindingFlags flags = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
         var tabs = (System.Collections.IList)typeof(MainWindow).GetField("_tabs", flags)!.GetValue(window)!;
         var tabType = typeof(MainWindow).GetNestedType("TerminalTab", System.Reflection.BindingFlags.NonPublic)!;
+        var paneType = typeof(MainWindow).GetNestedType("TerminalPane", System.Reflection.BindingFlags.NonPublic)!;
         var profileType = typeof(MainWindow).GetNestedType("TerminalProfile", System.Reflection.BindingFlags.NonPublic)!;
         foreach (var count in new[] { 3, 8 })
         {
             tabs.Clear();
             for (var i = 0; i < count; i++)
-                tabs.Add(Activator.CreateInstance(tabType, i + 1, Enum.ToObject(profileType, i % 3),
-                    i % 3 == 0 ? "Command Prompt" : i % 3 == 1 ? "PowerShell" : "WSL"));
+                tabs.Add(Activator.CreateInstance(tabType, Activator.CreateInstance(paneType, i + 1, Enum.ToObject(profileType, i % 3),
+                    i % 3 == 0 ? "Command Prompt" : i % 3 == 1 ? "PowerShell" : "WSL")));
             typeof(MainWindow).GetField("_activeTab", flags)!.SetValue(window, tabs[count - 1]);
             typeof(MainWindow).GetMethod("RebuildTabStrip", flags)!.Invoke(window, null);
             var root = (FrameworkElement)window.Content;
@@ -315,10 +316,10 @@ internal static class Program
             root.Measure(new Size(width, 620)); root.Arrange(new Rect(0, 0, width, 620)); root.UpdateLayout();
             root.Dispatcher.Invoke(() => { }, DispatcherPriority.Loaded);
             root.UpdateLayout();
-            var add = (FrameworkElement)window.FindName("NewTabButton");
+            var add = (FrameworkElement)window.FindName("SplitPaneButton");
             var location = add.TranslatePoint(new Point(), root);
             if (location.X < 0 || location.X + add.ActualWidth > width - 138)
-                throw new Exception("New-tab control is hidden by overflow or caption buttons");
+                throw new Exception("New-tab and split controls are hidden by overflow or caption buttons");
             var scroller = (System.Windows.Controls.ScrollViewer)window.FindName("TabScroller");
             if (count == 8 && scroller.ScrollableWidth <= 0) throw new Exception("Tab overflow is not scrollable");
             var bitmap = new RenderTargetBitmap(width, 80, 96, 96, PixelFormats.Pbgra32);
