@@ -1387,8 +1387,7 @@ ApplySavedFontSettings();
                 MinWidth = 120
             });
             pane.Frame.BorderThickness = new Thickness(split ? 1 : 0);
-            if (pane.View.Parent is Panel panel)
-                panel.Children.Remove(pane.View);
+            DetachView(pane.View);
             pane.Frame.Child = pane.View;
             Grid.SetColumn(pane.Frame, PaneHost.ColumnDefinitions.Count - 1);
             PaneHost.Children.Add(pane.Frame);
@@ -1402,6 +1401,29 @@ ApplySavedFontSettings();
         }
 
         UpdatePaneFrames();
+    }
+
+    // A view can still sit in the frame of a closed pane: the XAML view is handed to the next new pane.
+    private static void DetachView(TerminalView view)
+    {
+        switch (view.Parent)
+        {
+            case Panel panel:
+                panel.Children.Remove(view);
+                break;
+            case Decorator decorator:
+                decorator.Child = null;
+                break;
+        }
+    }
+
+    // Stops a closed pane from drawing into its view and frees the view for reuse.
+    private void ReleasePane(TerminalPane pane)
+    {
+        lock (_renderLock)
+            pane.IsShown = false;
+        pane.Frame.Child = null;
+        _ = pane.DisposeAsync();
     }
 
     private void UpdatePaneFrames()
@@ -1476,7 +1498,7 @@ ApplySavedFontSettings();
 
         DetachPane(tab, pane);
         RebuildTabStrip();
-        _ = pane.DisposeAsync();
+        ReleasePane(pane);
     }
 
     private void DetachPane(TerminalTab tab, TerminalPane pane)
@@ -1581,7 +1603,7 @@ ApplySavedFontSettings();
         {
             _activeTab = null;
             foreach (var pane in tab.Panes)
-                _ = pane.DisposeAsync();
+                ReleasePane(pane);
             Close();
             return;
         }
@@ -1596,7 +1618,7 @@ ApplySavedFontSettings();
 
         ActiveView.Focus();
         foreach (var pane in tab.Panes)
-            _ = pane.DisposeAsync();
+            ReleasePane(pane);
     }
 
     private void RebuildTabStrip()

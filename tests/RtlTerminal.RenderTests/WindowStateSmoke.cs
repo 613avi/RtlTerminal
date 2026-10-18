@@ -60,6 +60,18 @@ internal static class WindowStateSmoke
             if (((TerminalView)window.FindName("TerminalTextBox")).ViewportHeight <= 0)
                 throw new Exception("Viewport did not recover after minimize/restore");
             Console.WriteLine("PASS native maximize work-area bounds, bottom padding and minimize/restore cycle");
+            // Closing the first tab leaves the XAML view in that pane's frame; the next new tab reuses it.
+            var flags = BindingFlags.Instance | BindingFlags.NonPublic;
+            var createTab = typeof(MainWindow).GetMethod("CreateTerminalTab", flags)!;
+            var tabs = (System.Collections.IList)typeof(MainWindow).GetField("_tabs", flags)!.GetValue(window)!;
+            var profile = typeof(MainWindow).GetField("_defaultProfile", flags)!.GetValue(window)!;
+            createTab.Invoke(window, new[] { profile, null }); Pump();
+            createTab.Invoke(window, new[] { profile, null }); Pump();
+            typeof(MainWindow).GetMethod("CloseTab", flags)!.Invoke(window, new[] { tabs[0] }); Pump();
+            createTab.Invoke(window, new[] { profile, null }); Pump();
+            if (tabs.Count != 2 || !((TerminalView)window.FindName("TerminalTextBox")).IsVisible)
+                throw new Exception("New tab after closing the first one did not show the reused view");
+            Console.WriteLine("PASS new tab after closing the first tab");
         }
         finally { window.Close(); }
     }
